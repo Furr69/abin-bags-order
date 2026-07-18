@@ -16,6 +16,8 @@ test("ships carton ordering, product management, and PA-template export", async 
   assert.match(catalog, /workbook\.addImage/);
   assert.match(catalog, /保存修改/);
   assert.match(catalog, /删除商品/);
+  assert.match(catalog, /待上传商品预览/);
+  assert.match(catalog, /照片已选择，填写资料后点击保存/);
   assert.match(api, /export async function PUT/);
   assert.match(api, /export async function DELETE/);
   assert.match(api, /oai-authenticated-user-email/);
