@@ -23,6 +23,7 @@ test("ships carton ordering, product management, and PA-template export", async 
   assert.match(catalog, /imageToExcelDataUrl/);
   assert.match(catalog, /canvas\.width = 900/);
   assert.match(catalog, /row\.height = 170/);
+  assert.match(catalog, /ext: \{ width: 128, height: 218 \}/);
   assert.match(api, /export async function PUT/);
   assert.match(api, /await request\.formData\(\)/);
   assert.match(api, /uploadedImageKey \|\| current\.image_key/);

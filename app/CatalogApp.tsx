@@ -205,8 +205,9 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
             const base64 = await imageToExcelDataUrl(`/api/images/${product.image_key}`);
             const imageId = workbook.addImage({ base64, extension: "png" });
             sheet.addImage(imageId, {
-              tl: { col: 2.03, row: rowNumber - 0.97 },
-              br: { col: 2.97, row: rowNumber - 0.03 },
+              tl: { col: 2, row: rowNumber - 1 },
+              ext: { width: 128, height: 218 },
+              editAs: "oneCell",
             });
           } catch {
             // Keep the image cell empty if one remote image cannot be read.
