@@ -4,9 +4,11 @@ import test from "node:test";
 import ExcelJS from "exceljs";
 
 test("ships carton ordering, product management, and PA-template export", async () => {
-  const [catalog, api, hosting] = await Promise.all([
+  const [catalog, api, settingsApi, managePage, hosting] = await Promise.all([
     readFile(new URL("../app/CatalogApp.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/api/products/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/settings/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/manage/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../.openai/hosting.json", import.meta.url), "utf8"),
   ]);
   assert.match(catalog, /const packOptions = \[50, 60, 70, 80, 90, 100\]/);
@@ -16,6 +18,10 @@ test("ships carton ordering, product management, and PA-template export", async 
   assert.match(catalog, /删除商品/);
   assert.match(api, /export async function PUT/);
   assert.match(api, /export async function DELETE/);
+  assert.match(api, /oai-authenticated-user-email/);
+  assert.match(settingsApi, /export async function PUT/);
+  assert.match(catalog, /页面设置/);
+  assert.match(managePage, /requireChatGPTUser\("\/manage"\)/);
   assert.match(hosting, /"d1": "DB"/);
   assert.match(hosting, /"r2": "PRODUCT_IMAGES"/);
 });

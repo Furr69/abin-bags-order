@@ -1,8 +1,14 @@
 import { env } from "cloudflare:workers";
 
-type ProductEnv = { DB: D1Database; PRODUCT_IMAGES: R2Bucket };
+type ProductEnv = { DB: D1Database; PRODUCT_IMAGES: R2Bucket; ADMIN_EMAIL?: string };
 const runtime = () => env as unknown as ProductEnv;
 const packOptions = [50, 60, 70, 80, 90, 100];
+
+function isAdmin(request: Request) {
+  const adminEmail = String(runtime().ADMIN_EMAIL ?? "").toLowerCase();
+  const userEmail = String(request.headers.get("oai-authenticated-user-email") ?? "").toLowerCase();
+  return Boolean(adminEmail && userEmail && adminEmail === userEmail);
+}
 
 async function ensureProductsTable(db: D1Database) {
   await db.prepare(`CREATE TABLE IF NOT EXISTS products (
@@ -40,6 +46,7 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  if (!isAdmin(request)) return Response.json({ error: "没有管理权限" }, { status: 403 });
   try {
     const { DB, PRODUCT_IMAGES } = runtime();
     await ensureProductsTable(DB);
@@ -84,6 +91,7 @@ export async function POST(request: Request) {
 }
 
 export async function PUT(request: Request) {
+  if (!isAdmin(request)) return Response.json({ error: "没有管理权限" }, { status: 403 });
   try {
     const { DB } = runtime();
     await ensureProductsTable(DB);
@@ -103,6 +111,7 @@ export async function PUT(request: Request) {
 }
 
 export async function DELETE(request: Request) {
+  if (!isAdmin(request)) return Response.json({ error: "没有管理权限" }, { status: 403 });
   try {
     const { DB, PRODUCT_IMAGES } = runtime();
     await ensureProductsTable(DB);

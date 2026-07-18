@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { CSSProperties, FormEvent, useEffect, useMemo, useState } from "react";
 
 type Product = {
   id: number;
@@ -21,6 +21,27 @@ type Product = {
 
 type OrderLine = { cartons: number; unitsPerCarton: number };
 type ProductDraft = { category: string; packingQuantity: number; cartonVolume: number };
+type SiteSettings = {
+  brandName: string;
+  brandSubtitle: string;
+  heroEyebrow: string;
+  heroTitle: string;
+  heroDescription: string;
+  accent: string;
+  accentDark: string;
+  columns: number;
+};
+
+const defaultSettings: SiteSettings = {
+  brandName: "阿斌皮具",
+  brandSubtitle: "线上选品 · 按箱订货",
+  heroEyebrow: "ABIN LEATHER GOODS",
+  heroTitle: "选好款式，\n按箱快速订货。",
+  heroDescription: "填写箱数，选择每箱数量，系统自动计算总数量和金额。",
+  accent: "#df664e",
+  accentDark: "#b94634",
+  columns: 3,
+};
 
 const packOptions = [50, 60, 70, 80, 90, 100];
 const palettes = ["peach", "lilac", "sage", "sand", "rose", "sky"];
@@ -50,17 +71,19 @@ async function imageToDataUrl(url: string) {
   return canvas.toDataURL("image/png");
 }
 
-export default function CatalogApp() {
+export default function CatalogApp({ adminMode = false, adminName = "" }: { adminMode?: boolean; adminName?: string }) {
   const [products, setProducts] = useState<Product[]>([]);
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("全部分类");
   const [orders, setOrders] = useState<Record<number, OrderLine>>({});
   const [drafts, setDrafts] = useState<Record<number, ProductDraft>>({});
-  const [view, setView] = useState<"catalog" | "order" | "admin">("catalog");
+  const [view, setView] = useState<"catalog" | "order" | "admin" | "appearance">(adminMode ? "admin" : "catalog");
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [customer, setCustomer] = useState({ name: "", phone: "" });
+  const [settings, setSettings] = useState<SiteSettings>(defaultSettings);
+  const [settingsDraft, setSettingsDraft] = useState<SiteSettings>(defaultSettings);
 
   const loadProducts = async () => {
     try {
@@ -79,7 +102,20 @@ export default function CatalogApp() {
     }
   };
 
-  useEffect(() => { void loadProducts(); }, []);
+  const loadSettings = async () => {
+    try {
+      const response = await fetch("/api/settings");
+      const data = await response.json() as { settings?: SiteSettings; error?: string };
+      if (!response.ok) throw new Error(data.error || "页面设置加载失败");
+      const next = data.settings ?? defaultSettings;
+      setSettings(next);
+      setSettingsDraft(next);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "页面设置加载失败");
+    }
+  };
+
+  useEffect(() => { void loadProducts(); void loadSettings(); }, []);
 
   const categories = useMemo(() => ["全部分类", ...Array.from(new Set(products.map((product) => product.category || "未分类")))], [products]);
   const filtered = useMemo(() => products.filter((product) => {
@@ -247,22 +283,53 @@ export default function CatalogApp() {
     setNotice("商品已删除");
   };
 
+  const saveAppearance = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setLoading(true);
+    setNotice("");
+    try {
+      const response = await fetch("/api/settings", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(settingsDraft),
+      });
+      const data = await response.json() as { settings?: SiteSettings; error?: string };
+      if (!response.ok) throw new Error(data.error || "页面设置保存失败");
+      const next = data.settings ?? settingsDraft;
+      setSettings(next);
+      setSettingsDraft(next);
+      setNotice("页面外观已经更新，客户刷新后即可看到");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "页面设置保存失败");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const themeStyle = {
+    "--accent": settings.accent,
+    "--accent-dark": settings.accentDark,
+    "--grid-columns": String(settings.columns),
+  } as CSSProperties;
+
   return (
-    <main>
+    <main className="catalog-app" style={themeStyle}>
       <header className="topbar">
         <button className="brand" onClick={() => setView("catalog")} aria-label="返回商品选品">
-          <span className="brand-mark">AB</span><span><b>阿斌皮具</b><small>线上选品 · 按箱订货</small></span>
+          <span className="brand-mark">AB</span><span><b>{settings.brandName}</b><small>{settings.brandSubtitle}</small></span>
         </button>
         <nav aria-label="主要导航">
           <button className={view === "catalog" ? "active" : ""} onClick={() => setView("catalog")}>商品选品</button>
           <button className={view === "order" ? "active" : ""} onClick={() => setView("order")}>订货单 <em>{selected.length}</em></button>
-          <button className={view === "admin" ? "active" : ""} onClick={() => setView("admin")}>商品管理</button>
+          {adminMode && <button className={view === "admin" ? "active" : ""} onClick={() => setView("admin")}>商品管理</button>}
+          {adminMode && <button className={view === "appearance" ? "active" : ""} onClick={() => setView("appearance")}>页面设置</button>}
+          {!adminMode && <a className="owner-link" href="/manage">店主管理</a>}
         </nav>
       </header>
 
       {view === "catalog" && <>
         <section className="hero">
-          <div><span className="eyebrow">ABIN LEATHER GOODS</span><h1>选好款式，<br />按箱快速订货。</h1><p>填写箱数，选择每箱数量，系统自动计算总数量和金额。</p></div>
+          <div><span className="eyebrow">{settings.heroEyebrow}</span><h1>{settings.heroTitle}</h1><p>{settings.heroDescription}</p></div>
           <div className="hero-card"><span>线上商品库</span><strong>{products.length}<small> 款</small></strong><i>女包 · 背包 · 旅行包</i></div>
         </section>
         <section className="catalog-shell">
@@ -271,7 +338,7 @@ export default function CatalogApp() {
             <div className="result-count">共 <b>{filtered.length}</b> 款商品</div>
           </div>
           <div className="chips">{categories.map((category) => <button key={category} className={categoryFilter === category ? "selected" : ""} onClick={() => setCategoryFilter(category)}>{category}</button>)}</div>
-          {products.length === 0 ? <div className="empty catalog-empty"><b>商品库还是空的</b><p>请先到“商品管理”上传商品图片和资料。</p><button onClick={() => setView("admin")}>去上传商品</button></div> :
+          {products.length === 0 ? <div className="empty catalog-empty"><b>商品库正在准备中</b><p>店主正在上传商品图片和资料，请稍后再来。</p>{adminMode && <button onClick={() => setView("admin")}>去上传商品</button>}</div> :
           <div className="product-grid">{filtered.map((product, index) => {
             const order = orderFor(product);
             return <article className="product-card" key={product.id}>
@@ -336,9 +403,32 @@ export default function CatalogApp() {
         }) : <div className="manage-empty">还没有商品，请使用上方表单添加。</div>}</div>
       </section>}
 
+      {view === "appearance" && adminMode && <section className="admin-page">
+        <div className="section-heading"><div><span className="eyebrow">SITE APPEARANCE</span><h1>页面设置</h1><p>这些内容保存后会立即显示在客户看到的商品页面。</p></div><div className="admin-note">当前管理员：{adminName || "店主"}<br />商品、图片和订货Excel不会受到外观调整影响。</div></div>
+        <form className="appearance-form" onSubmit={saveAppearance}>
+          <div className="appearance-fields">
+            <h2>店铺文字</h2>
+            <label>店铺名称<input value={settingsDraft.brandName} onChange={(event) => setSettingsDraft({ ...settingsDraft, brandName: event.target.value })} /></label>
+            <label>顶部副标题<input value={settingsDraft.brandSubtitle} onChange={(event) => setSettingsDraft({ ...settingsDraft, brandSubtitle: event.target.value })} /></label>
+            <label>首页英文小标题<input value={settingsDraft.heroEyebrow} onChange={(event) => setSettingsDraft({ ...settingsDraft, heroEyebrow: event.target.value })} /></label>
+            <label>首页主标题<textarea value={settingsDraft.heroTitle} onChange={(event) => setSettingsDraft({ ...settingsDraft, heroTitle: event.target.value })} /></label>
+            <label>首页说明<textarea value={settingsDraft.heroDescription} onChange={(event) => setSettingsDraft({ ...settingsDraft, heroDescription: event.target.value })} /></label>
+          </div>
+          <div className="appearance-fields">
+            <h2>颜色与排版</h2>
+            <label>主色<input type="color" value={settingsDraft.accent} onChange={(event) => setSettingsDraft({ ...settingsDraft, accent: event.target.value })} /></label>
+            <label>深色强调<input type="color" value={settingsDraft.accentDark} onChange={(event) => setSettingsDraft({ ...settingsDraft, accentDark: event.target.value })} /></label>
+            <label>电脑端每行商品数<select value={settingsDraft.columns} onChange={(event) => setSettingsDraft({ ...settingsDraft, columns: Number(event.target.value) })}><option value="2">2 款（图片更大）</option><option value="3">3 款（推荐）</option><option value="4">4 款（显示更多）</option></select></label>
+            <div className="theme-presets"><span>快速配色</span><button type="button" onClick={() => setSettingsDraft({ ...settingsDraft, accent: "#df664e", accentDark: "#b94634" })}>暖陶红</button><button type="button" onClick={() => setSettingsDraft({ ...settingsDraft, accent: "#8f6b5d", accentDark: "#60463c" })}>皮革棕</button><button type="button" onClick={() => setSettingsDraft({ ...settingsDraft, accent: "#365c59", accentDark: "#24413f" })}>墨绿色</button></div>
+            <div className="appearance-preview" style={{ "--preview-accent": settingsDraft.accent } as CSSProperties}><span>AB</span><div><b>{settingsDraft.brandName || "店铺名称"}</b><small>{settingsDraft.heroTitle || "首页主标题"}</small></div></div>
+          </div>
+          <button className="save-product appearance-save" disabled={loading}>{loading ? "正在保存…" : "保存页面设置"}</button>
+        </form>
+      </section>}
+
       {selected.length > 0 && view === "catalog" && <button className="floating-order" onClick={() => setView("order")}><span><b>{selected.length}</b> 款 · {totalCartons} 箱 · {totalPieces} 个</span><strong>查看订货单　¥{totalAmount.toFixed(2)} →</strong></button>}
       {notice && <button className="toast" onClick={() => setNotice("")}>{notice}<span>×</span></button>}
-      <footer><span>阿斌皮具 · 线上选品订货</span><small>商品资料以最终确认为准</small></footer>
+      <footer><span>{settings.brandName} · 线上选品订货</span><small>商品资料以最终确认为准</small></footer>
     </main>
   );
 }

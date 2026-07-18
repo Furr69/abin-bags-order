@@ -18,3 +18,16 @@ export const products = sqliteTable("products", {
   imageKey: text("image_key"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
+
+export const siteSettings = sqliteTable("site_settings", {
+  id: integer("id").primaryKey(),
+  brandName: text("brand_name").notNull().default("阿斌皮具"),
+  brandSubtitle: text("brand_subtitle").notNull().default("线上选品 · 按箱订货"),
+  heroEyebrow: text("hero_eyebrow").notNull().default("ABIN LEATHER GOODS"),
+  heroTitle: text("hero_title").notNull().default("选好款式，按箱快速订货。"),
+  heroDescription: text("hero_description").notNull().default("填写箱数，选择每箱数量，系统自动计算总数量和金额。"),
+  accent: text("accent").notNull().default("#df664e"),
+  accentDark: text("accent_dark").notNull().default("#b94634"),
+  columns: integer("columns").notNull().default(3),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
