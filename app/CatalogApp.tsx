@@ -1,6 +1,6 @@
 "use client";
 
-import { CSSProperties, FormEvent, useEffect, useMemo, useState } from "react";
+import { CSSProperties, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 type Product = {
   id: number;
@@ -86,6 +86,7 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
   const [settingsDraft, setSettingsDraft] = useState<SiteSettings>(defaultSettings);
   const [imagePreview, setImagePreview] = useState("");
   const [imageName, setImageName] = useState("");
+  const imageInputRef = useRef<HTMLInputElement>(null);
 
   const loadProducts = async () => {
     try {
@@ -386,16 +387,18 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
       {view === "admin" && <section className="admin-page">
         <div className="section-heading"><div><span className="eyebrow">PRODUCT MANAGER</span><h1>商品管理</h1><p>上传新商品，也可以在下方修改分类、装箱资料或删除商品。</p></div><div className="admin-note">每箱数量只能选择 50、60、70、80、90、100。图片会同时导出到 Excel。</div></div>
         <form className="product-form" onSubmit={submitProduct}>
-          <label className={`image-upload ${imagePreview ? "has-image" : ""}`} htmlFor="product-image-input">
-            <input id="product-image-input" type="file" name="image" accept="image/jpeg,image/png,image/webp" onChange={(event) => {
+          <div className={`image-upload ${imagePreview ? "has-image" : ""}`}>
+            <input ref={imageInputRef} className="image-file-input" id="product-image-input" type="file" name="image" accept="image/jpeg,image/png,image/webp" onChange={(event) => {
               const file = event.target.files?.[0];
               if (imagePreview) URL.revokeObjectURL(imagePreview);
               if (!file) { setImagePreview(""); setImageName(""); return; }
               setImagePreview(URL.createObjectURL(file));
               setImageName(file.name);
             }} />
-            {imagePreview ? <><img className="upload-preview" src={imagePreview} alt="待上传商品预览" /><span className="change-image">更换照片</span><b>{imageName}</b><small>照片已选择，填写资料后点击保存</small></> : <><span>＋</span><b>点击选择商品照片</b><small>整块区域都可以点击 · JPG、PNG、WebP，不超过 12MB</small></>}
-          </label>
+            <button className="image-picker-trigger" type="button" onClick={() => imageInputRef.current?.click()}>
+              {imagePreview ? <><img className="upload-preview" src={imagePreview} alt="待上传商品预览" /><span className="change-image">更换照片</span><b>{imageName}</b><small>照片已选择，填写资料后点击保存</small></> : <><span className="upload-plus">＋</span><b>选择商品照片</b><small>JPG、PNG、WebP，不超过 12MB</small></>}
+            </button>
+          </div>
           <div className="form-fields"><div className="form-grid">
             <label>工厂货号 *<input name="sku" required placeholder="如 8057#" /></label><label>中文名称 *<input name="name" required placeholder="如 女包" /></label>
             <label>客人货号/型号<input name="model" placeholder="选填" /></label><label>款式<input name="style" placeholder="如 单肩包" /></label>
