@@ -12,6 +12,7 @@ export const products = sqliteTable("products", {
   material: text("material").notNull().default(""),
   size: text("size").notNull().default(""),
   packingQuantity: integer("packing_quantity").notNull().default(1),
+  cartonVolume: real("carton_volume").notNull().default(0),
   stock: integer("stock").notNull().default(0),
   notes: text("notes").notNull().default(""),
   imageKey: text("image_key"),

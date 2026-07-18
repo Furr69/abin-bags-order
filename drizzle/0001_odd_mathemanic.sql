@@ -1,0 +1,1 @@
+ALTER TABLE `products` ADD `carton_volume` real DEFAULT 0 NOT NULL;
