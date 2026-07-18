@@ -20,7 +20,6 @@ type Product = {
 };
 
 type OrderLine = { cartons: number; unitsPerCarton: number };
-type ProductDraft = { category: string; packingQuantity: number; cartonVolume: number };
 type SiteSettings = {
   brandName: string;
   brandSubtitle: string;
@@ -50,23 +49,25 @@ const suggestedCategories = ["女包", "男包", "双肩包", "旅行包", "钱�
 const defaultPack = (product: Product) => packOptions.includes(Number(product.packing_quantity)) ? Number(product.packing_quantity) : 100;
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
-async function imageToDataUrl(url: string) {
+async function imageToExcelDataUrl(url: string) {
   const response = await fetch(url);
   if (!response.ok) throw new Error("商品图片读取失败");
   const blob = await response.blob();
-  if (blob.type === "image/jpeg" || blob.type === "image/png") {
-    return await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result));
-      reader.onerror = () => reject(new Error("商品图片转换失败"));
-      reader.readAsDataURL(blob);
-    });
-  }
   const bitmap = await createImageBitmap(blob);
   const canvas = document.createElement("canvas");
-  canvas.width = bitmap.width;
-  canvas.height = bitmap.height;
-  canvas.getContext("2d")?.drawImage(bitmap, 0, 0);
+  canvas.width = 900;
+  canvas.height = 1200;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("商品图片转换失败");
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = "high";
+  const padding = 28;
+  const scale = Math.min((canvas.width - padding * 2) / bitmap.width, (canvas.height - padding * 2) / bitmap.height);
+  const width = bitmap.width * scale;
+  const height = bitmap.height * scale;
+  context.drawImage(bitmap, (canvas.width - width) / 2, (canvas.height - height) / 2, width, height);
   bitmap.close();
   return canvas.toDataURL("image/png");
 }
@@ -76,7 +77,7 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("全部分类");
   const [orders, setOrders] = useState<Record<number, OrderLine>>({});
-  const [drafts, setDrafts] = useState<Record<number, ProductDraft>>({});
+  const [editingId, setEditingId] = useState<number | null>(null);
   const [view, setView] = useState<"catalog" | "order" | "admin" | "appearance">(adminMode ? "admin" : "catalog");
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(false);
@@ -95,11 +96,6 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
       if (!response.ok) throw new Error(data.error || "商品加载失败");
       const next = data.products ?? [];
       setProducts(next);
-      setDrafts(Object.fromEntries(next.map((product) => [product.id, {
-        category: product.category || "女包",
-        packingQuantity: defaultPack(product),
-        cartonVolume: Number(product.carton_volume) || 0,
-      }])));
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "商品加载失败");
     }
@@ -183,7 +179,7 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
         const order = orderFor(product);
         const rowNumber = 5 + index;
         const row = sheet.getRow(rowNumber);
-        row.height = 150;
+        row.height = 170;
         productStyle.forEach((style, styleIndex) => { row.getCell(styleIndex + 2).style = clone(style); });
         const totalQuantity = order.cartons * order.unitsPerCarton;
         const amount = totalQuantity * Number(product.price);
@@ -206,13 +202,11 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
 
         if (product.image_key) {
           try {
-            const base64 = await imageToDataUrl(`/api/images/${product.image_key}`);
-            const extension = base64.startsWith("data:image/jpeg") ? "jpeg" : "png";
-            const imageId = workbook.addImage({ base64, extension });
+            const base64 = await imageToExcelDataUrl(`/api/images/${product.image_key}`);
+            const imageId = workbook.addImage({ base64, extension: "png" });
             sheet.addImage(imageId, {
-              tl: { col: 2.04, row: rowNumber - 0.96 },
-              br: { col: 2.96, row: rowNumber - 0.04 },
-              editAs: "oneCell",
+              tl: { col: 2.03, row: rowNumber - 0.97 },
+              br: { col: 2.97, row: rowNumber - 0.03 },
             });
           } catch {
             // Keep the image cell empty if one remote image cannot be read.
@@ -266,18 +260,24 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
     } finally { setLoading(false); }
   };
 
-  const saveProductSettings = async (product: Product) => {
-    const draft = drafts[product.id];
-    if (!draft) return;
-    const response = await fetch("/api/products", {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id: product.id, ...draft }),
-    });
-    const data = await response.json() as { error?: string };
-    if (!response.ok) return setNotice(data.error || "修改失败");
-    await loadProducts();
-    setNotice("商品分类和装箱资料已更新");
+  const updateProduct = async (event: FormEvent<HTMLFormElement>, product: Product) => {
+    event.preventDefault();
+    setLoading(true);
+    setNotice("");
+    try {
+      const form = new FormData(event.currentTarget);
+      form.set("id", String(product.id));
+      const response = await fetch("/api/products", { method: "PUT", body: form });
+      const data = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(data.error || "修改失败");
+      await loadProducts();
+      setEditingId(null);
+      setNotice("商品全部资料和照片已更新");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "修改失败");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const deleteProduct = async (product: Product) => {
@@ -385,7 +385,7 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
       </section>}
 
       {view === "admin" && <section className="admin-page">
-        <div className="section-heading"><div><span className="eyebrow">PRODUCT MANAGER</span><h1>商品管理</h1><p>上传新商品，也可以在下方修改分类、装箱资料或删除商品。</p></div><div className="admin-note">每箱数量只能选择 50、60、70、80、90、100。图片会同时导出到 Excel。</div></div>
+        <div className="section-heading"><div><span className="eyebrow">PRODUCT MANAGER</span><h1>商品管理</h1><p>上传新商品，也可以在下方编辑全部资料、更换照片或删除商品。</p></div><div className="admin-note">每箱数量只能选择 50、60、70、80、90、100。图片会自动适配 Excel 图片格。</div></div>
         <form className="product-form" onSubmit={submitProduct}>
           <div className={`image-upload ${imagePreview ? "has-image" : ""}`}>
             <input ref={imageInputRef} className="image-file-input" id="product-image-input" type="file" name="image" accept="image/jpeg,image/png,image/webp" onChange={(event) => {
@@ -408,17 +408,31 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
             <label>现有库存<input name="stock" min="0" type="number" defaultValue="0" /></label>
           </div><label>备注<textarea name="notes" placeholder="颜色、包装要求等" /></label><button className="save-product" disabled={loading}>{loading ? "正在保存…" : "保存并发布商品"}</button></div>
         </form>
-        <div className="manage-list"><h2>已发布商品 <small>（{products.length}）</small></h2>{products.length ? products.map((product) => {
-          const draft = drafts[product.id] ?? { category: product.category, packingQuantity: defaultPack(product), cartonVolume: Number(product.carton_volume) || 0 };
-          return <div className="manage-product" key={product.id}>
+        <div className="manage-list"><h2>已发布商品 <small>（{products.length}）</small></h2>{products.length ? products.map((product) => editingId === product.id ?
+          <form className="manage-editor" key={product.id} onSubmit={(event) => updateProduct(event, product)}>
+            <div className="editor-image">
+              <span className="editor-thumb">{product.image_key ? <img src={`/api/images/${product.image_key}`} alt={product.name} /> : "AB"}</span>
+              <label className="replace-photo">更换商品照片<input type="file" name="image" accept="image/jpeg,image/png,image/webp" /></label>
+              <small>不选择新照片则保留原照片</small>
+            </div>
+            <div className="editor-fields">
+              <div className="form-grid">
+                <label>工厂货号 *<input name="sku" required defaultValue={product.sku} /></label><label>中文名称 *<input name="name" required defaultValue={product.name} /></label>
+                <label>客人货号/型号<input name="model" defaultValue={product.model} /></label><label>款式<input name="style" defaultValue={product.style} /></label>
+                <label>单价 *<input name="price" required min="0" step="0.01" type="number" defaultValue={product.price} /></label><label>箱包分类<input name="category" list="category-options" defaultValue={product.category || "女包"} /></label>
+                <label>材质<input name="material" defaultValue={product.material} /></label><label>规格/尺寸<input name="size" defaultValue={product.size} /></label>
+                <label>每箱数量<select name="packingQuantity" defaultValue={defaultPack(product)}>{packOptions.map((option) => <option key={option} value={option}>{option} 个</option>)}</select></label><label>单箱体积 m³<input name="cartonVolume" min="0" step="0.001" type="number" defaultValue={Number(product.carton_volume) || ""} /></label>
+                <label>现有库存<input name="stock" min="0" type="number" defaultValue={product.stock} /></label>
+              </div>
+              <label>备注<textarea name="notes" defaultValue={product.notes} /></label>
+              <div className="editor-actions"><button className="cancel-row" type="button" onClick={() => setEditingId(null)}>取消</button><button className="save-row" disabled={loading}>{loading ? "正在保存…" : "保存全部修改"}</button></div>
+            </div>
+          </form> :
+          <div className="manage-product-summary" key={product.id}>
             <span className="manage-thumb">{product.image_key ? <img src={`/api/images/${product.image_key}`} alt="" /> : "AB"}</span>
-            <div className="manage-name"><b>{product.name}</b><small>{product.sku} · ¥{Number(product.price).toFixed(2)}</small></div>
-            <label>分类<input value={draft.category} onChange={(event) => setDrafts({ ...drafts, [product.id]: { ...draft, category: event.target.value } })} /></label>
-            <label>每箱<select value={draft.packingQuantity} onChange={(event) => setDrafts({ ...drafts, [product.id]: { ...draft, packingQuantity: Number(event.target.value) } })}>{packOptions.map((option) => <option key={option}>{option}</option>)}</select></label>
-            <label>单箱体积<input type="number" min="0" step="0.001" value={draft.cartonVolume || ""} onChange={(event) => setDrafts({ ...drafts, [product.id]: { ...draft, cartonVolume: Number(event.target.value) || 0 } })} /></label>
-            <button className="save-row" onClick={() => saveProductSettings(product)}>保存修改</button><button className="delete-row" onClick={() => deleteProduct(product)}>删除商品</button>
-          </div>;
-        }) : <div className="manage-empty">还没有商品，请使用上方表单添加。</div>}</div>
+            <div className="manage-name"><b>{product.name}</b><small>{product.sku} · {product.category} · ¥{Number(product.price).toFixed(2)} · 每箱 {defaultPack(product)} 个</small></div>
+            <button className="edit-row" onClick={() => setEditingId(product.id)}>编辑全部信息/更换照片</button><button className="delete-row" onClick={() => deleteProduct(product)}>删除商品</button>
+          </div>) : <div className="manage-empty">还没有商品，请使用上方表单添加。</div>}</div>
       </section>}
 
       {view === "appearance" && adminMode && <section className="admin-page">

@@ -92,21 +92,57 @@ export async function POST(request: Request) {
 
 export async function PUT(request: Request) {
   if (!isAdmin(request)) return Response.json({ error: "没有管理权限" }, { status: 403 });
+  const { DB, PRODUCT_IMAGES } = runtime();
+  let uploadedImageKey: string | null = null;
   try {
-    const { DB } = runtime();
     await ensureProductsTable(DB);
-    const payload = await request.json() as { id?: number; category?: string; packingQuantity?: number; cartonVolume?: number };
-    const id = Number(payload.id);
-    const packingQuantity = Number(payload.packingQuantity);
-    if (!Number.isInteger(id) || id < 1 || !packOptions.includes(packingQuantity)) {
-      return Response.json({ error: "商品或每箱数量无效" }, { status: 400 });
+    const form = await request.formData();
+    const value = (key: string) => String(form.get(key) ?? "").trim();
+    const id = Number(value("id"));
+    const sku = value("sku");
+    const name = value("name");
+    const price = Number(value("price"));
+    const packingQuantity = Number(value("packingQuantity"));
+    if (!Number.isInteger(id) || id < 1) {
+      return Response.json({ error: "商品无效" }, { status: 400 });
     }
-    await DB.prepare("UPDATE products SET category = ?, packing_quantity = ?, carton_volume = ? WHERE id = ?")
-      .bind(String(payload.category ?? "女包").trim() || "女包", packingQuantity, Math.max(0, Number(payload.cartonVolume) || 0), id)
-      .run();
+    if (!sku || !name || !Number.isFinite(price) || price < 0) {
+      return Response.json({ error: "请填写货号、品名和有效价格" }, { status: 400 });
+    }
+    if (!packOptions.includes(packingQuantity)) {
+      return Response.json({ error: "每箱数量只能选择 50、60、70、80、90 或 100" }, { status: 400 });
+    }
+
+    const current = await DB.prepare("SELECT image_key FROM products WHERE id = ?").bind(id).first<{ image_key: string | null }>();
+    if (!current) return Response.json({ error: "找不到这个商品" }, { status: 404 });
+
+    const image = form.get("image");
+    if (image instanceof File && image.size > 0) {
+      if (!image.type.startsWith("image/") || image.size > 12 * 1024 * 1024) {
+        return Response.json({ error: "图片需小于 12MB，且必须是图片格式" }, { status: 400 });
+      }
+      const extension = image.name.split(".").pop()?.replace(/[^a-zA-Z0-9]/g, "") || "jpg";
+      uploadedImageKey = `${crypto.randomUUID()}.${extension}`;
+      await PRODUCT_IMAGES.put(uploadedImageKey, await image.arrayBuffer(), { httpMetadata: { contentType: image.type } });
+    }
+
+    await DB.prepare(`UPDATE products SET
+      sku = ?, name = ?, model = ?, style = ?, category = ?, price = ?, material = ?, size = ?,
+      packing_quantity = ?, carton_volume = ?, stock = ?, notes = ?, image_key = ?
+      WHERE id = ?`)
+      .bind(
+        sku, name, value("model"), value("style"), value("category") || "女包", price,
+        value("material"), value("size"), packingQuantity,
+        Math.max(0, Number(value("cartonVolume")) || 0),
+        Math.max(0, Number(value("stock")) || 0), value("notes"),
+        uploadedImageKey || current.image_key, id,
+      ).run();
+    if (uploadedImageKey && current.image_key) await PRODUCT_IMAGES.delete(current.image_key).catch(() => undefined);
     return Response.json({ ok: true });
   } catch (error) {
-    return Response.json({ error: error instanceof Error ? error.message : "修改失败" }, { status: 500 });
+    if (uploadedImageKey) await PRODUCT_IMAGES.delete(uploadedImageKey).catch(() => undefined);
+    const message = error instanceof Error ? error.message : "修改失败";
+    return Response.json({ error: message.includes("UNIQUE") ? "这个货号已经存在" : message }, { status: 500 });
   }
 }
 
