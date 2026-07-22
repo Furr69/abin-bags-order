@@ -28,6 +28,12 @@ test("ships a private photo library with optional prices and full-size downloads
   assert.match(catalog, /const maxUploadBytes = 1_500_000/);
   assert.match(catalog, /optimizeImageForUpload/);
   assert.match(catalog, /response.status === 413/);
+  assert.match(catalog, /生成 Excel/);
+  assert.match(catalog, /className="shipping-control"/);
+  assert.match(catalog, /className="inline-price"/);
+  assert.match(catalog, /saveProductPrice/);
+  assert.match(api, /export async function PATCH/);
+  assert.match(catalog, /row\.getCell\("H"\)\.value = hasPrice \? Number\(product\.price\) : null/);
   assert.match(catalog, /imageInputRef\.current\?\.click\(\)/);
   assert.match(catalog, /imageToExcelDataUrl/);
   assert.match(catalog, /canvas\.width = 900/);

@@ -153,6 +153,25 @@ export async function PUT(request: Request) {
   }
 }
 
+export async function PATCH(request: Request) {
+  if (!isAdmin(request)) return Response.json({ error: "没有管理权限" }, { status: 403 });
+  try {
+    const { DB } = runtime();
+    await ensureProductsTable(DB);
+    const payload = await request.json() as { id?: unknown; price?: unknown };
+    const id = Number(payload.id);
+    const priceText = String(payload.price ?? "").trim();
+    const price = priceText === "" ? 0 : Number(priceText);
+    if (!Number.isInteger(id) || id < 1) return Response.json({ error: "商品无效" }, { status: 400 });
+    if (!Number.isFinite(price) || price < 0) return Response.json({ error: "价格需要是有效的非负数，也可以留空" }, { status: 400 });
+    const result = await DB.prepare("UPDATE products SET price = ? WHERE id = ?").bind(price, id).run();
+    if (!result.meta.changes) return Response.json({ error: "找不到这个商品" }, { status: 404 });
+    return Response.json({ ok: true, price });
+  } catch (error) {
+    return Response.json({ error: error instanceof Error ? error.message : "价格保存失败" }, { status: 500 });
+  }
+}
+
 export async function DELETE(request: Request) {
   if (!isAdmin(request)) return Response.json({ error: "没有管理权限" }, { status: 403 });
   try {

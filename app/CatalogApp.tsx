@@ -131,6 +131,8 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
   const [imagePreview, setImagePreview] = useState("");
   const [imageName, setImageName] = useState("");
   const [lightbox, setLightbox] = useState<Product | null>(null);
+  const [priceDrafts, setPriceDrafts] = useState<Record<number, string>>({});
+  const [savingPriceId, setSavingPriceId] = useState<number | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
 
   const loadProducts = async () => {
@@ -190,6 +192,7 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
     const order = orderFor(product);
     return sum + order.cartons * order.unitsPerCarton * Number(product.price);
   }, 0);
+  const hasPricedSelection = selected.some((product) => Number(product.price) > 0);
 
   const exportExcel = async () => {
     if (!selected.length) return setNotice("请先选择商品并填写箱数");
@@ -234,7 +237,8 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
         row.height = 170;
         productStyle.forEach((style, styleIndex) => { row.getCell(styleIndex + 2).style = clone(style); });
         const totalQuantity = order.cartons * order.unitsPerCarton;
-        const amount = totalQuantity * Number(product.price);
+        const hasPrice = Number(product.price) > 0;
+        const amount = hasPrice ? totalQuantity * Number(product.price) : 0;
         const totalVolume = order.cartons * Number(product.carton_volume || 0);
         row.getCell("B").value = product.material;
         row.getCell("C").value = null;
@@ -242,12 +246,12 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
         row.getCell("E").value = product.sku;
         row.getCell("F").value = product.name || product.category;
         row.getCell("G").value = [product.style, product.size].filter(Boolean).join(" / ");
-        row.getCell("H").value = Number(product.price);
+        row.getCell("H").value = hasPrice ? Number(product.price) : null;
         row.getCell("I").value = order.cartons;
         row.getCell("J").value = order.unitsPerCarton;
         row.getCell("K").value = "个";
         row.getCell("L").value = { formula: `I${rowNumber}*J${rowNumber}`, result: totalQuantity };
-        row.getCell("M").value = { formula: `H${rowNumber}*L${rowNumber}`, result: amount };
+        row.getCell("M").value = hasPrice ? { formula: `H${rowNumber}*L${rowNumber}`, result: amount } : null;
         row.getCell("N").value = Number(product.carton_volume || 0) || null;
         row.getCell("O").value = { formula: `I${rowNumber}*N${rowNumber}`, result: totalVolume };
         row.getCell("P").value = product.notes;
@@ -337,6 +341,32 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
     }
   };
 
+  const saveProductPrice = async (product: Product, rawPrice: string) => {
+    const trimmed = rawPrice.trim();
+    const price = trimmed === "" ? 0 : Number(trimmed);
+    if (!Number.isFinite(price) || price < 0) return setNotice("价格需要是有效的非负数，也可以留空");
+    if (price === Number(product.price)) return;
+    setSavingPriceId(product.id);
+    setNotice("");
+    try {
+      const response = await fetch("/api/products", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: product.id, price: trimmed }),
+      });
+      const data = await readApiResponse(response);
+      if (!response.ok) throw new Error(data.error || "价格保存失败");
+      setProducts((current) => current.map((item) => item.id === product.id ? { ...item, price } : item));
+      setPriceDrafts((current) => ({ ...current, [product.id]: trimmed }));
+      setNotice(trimmed ? "价格已保存" : "价格已清空");
+    } catch (error) {
+      setPriceDrafts((current) => ({ ...current, [product.id]: Number(product.price) > 0 ? String(product.price) : "" }));
+      setNotice(error instanceof Error ? error.message : "价格保存失败");
+    } finally {
+      setSavingPriceId(null);
+    }
+  };
+
   const deleteProduct = async (product: Product) => {
     if (!confirm(`确定删除「${product.name}」吗？删除后无法恢复。`)) return;
     const response = await fetch(`/api/products?id=${product.id}`, { method: "DELETE" });
@@ -384,6 +414,7 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
         </button>
         <nav aria-label="主要导航">
           <button className={view === "catalog" ? "active" : ""} onClick={() => setView("catalog")}>图片库</button>
+          <button className={view === "order" ? "active" : ""} onClick={() => setView("order")}>生成 Excel <em>{selected.length}</em></button>
           <button className={view === "admin" ? "active" : ""} onClick={() => setView("admin")}>上传图片</button>
         </nav>
       </header>
@@ -401,6 +432,7 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
           <div className="chips">{categories.map((category) => <button key={category} className={categoryFilter === category ? "selected" : ""} onClick={() => setCategoryFilter(category)}>{category}</button>)}</div>
           {products.length === 0 ? <div className="empty catalog-empty"><b>图片库还是空的</b><p>去上传第一张商品图片吧。</p>{adminMode && <button onClick={() => setView("admin")}>去上传商品</button>}</div> :
           <div className="product-grid">{filtered.map((product, index) => {
+            const order = orderFor(product);
             return <article className="product-card" key={product.id}>
               <button type="button" className={`product-image image-zoom ${palettes[index % palettes.length]}`} onClick={() => product.image_key && setLightbox(product)} disabled={!product.image_key} aria-label={product.image_key ? `放大查看${product.name}` : `${product.name}暂无图片`}>
                 {product.image_key ? <img src={`/api/images/${product.image_key}`} alt={product.name} /> : <><span className="bag-shape">◡</span><small>暂无商品图片</small></>}
@@ -408,8 +440,13 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
                 {product.image_key && <span className="zoom-hint">点击放大</span>}
               </button>
               <div className="product-info">
-                <div className="title-row"><div><h3>{product.name}</h3><p>{product.category} · {product.model || product.style || "箱包"}</p></div>{Number(product.price) > 0 && <strong>¥{Number(product.price).toFixed(2)}</strong>}</div>
+                <div className="title-row"><div><h3>{product.name}</h3><p>{product.category} · {product.model || product.style || "箱包"}</p></div><label className="inline-price"><span>价格</span><span className="price-input"><i>¥</i><input type="number" min="0" step="0.01" value={priceDrafts[product.id] ?? (Number(product.price) > 0 ? String(product.price) : "")} placeholder="选填" disabled={savingPriceId === product.id} onChange={(event) => setPriceDrafts((current) => ({ ...current, [product.id]: event.target.value }))} onBlur={(event) => void saveProductPrice(product, event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} /></span></label></div>
                 <div className="meta"><span>{product.material || "材质待补充"}</span><span>{product.size || "尺寸待补充"}</span><span>{product.notes || "现货款"}</span></div>
+                <div className="shipping-control">
+                  <label><span>订购箱数</span><input type="number" min="0" step="1" value={order.cartons || ""} placeholder="填箱数" onChange={(event) => setOrder(product, { cartons: Math.max(0, Math.floor(Number(event.target.value) || 0)) })} /></label>
+                  <label><span>每箱数量</span><select value={order.unitsPerCarton} onChange={(event) => setOrder(product, { unitsPerCarton: Number(event.target.value) })}>{packOptions.map((option) => <option key={option} value={option}>{option} 个</option>)}</select></label>
+                </div>
+                {order.cartons > 0 && <div className="calculated">{order.cartons} 箱 × {order.unitsPerCarton} 个 = <b>{order.cartons * order.unitsPerCarton} 个</b></div>}
               </div>
             </article>;
           })}</div>}
@@ -417,7 +454,7 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
       </>}
 
       {view === "order" && <section className="order-page">
-        <div className="section-heading"><div><span className="eyebrow">PACKING LIST</span><h1>确认装箱单</h1><p>确认箱数和每箱数量后，按最新 PA 模板生成 Excel。</p></div><div className="order-summary"><span>{selected.length} 个款式</span><b>{totalCartons} 箱 / {totalPieces} 个</b><strong>¥{totalAmount.toLocaleString("zh-CN", { minimumFractionDigits: 2 })}</strong></div></div>
+        <div className="section-heading"><div><span className="eyebrow">PACKING LIST</span><h1>确认装箱单</h1><p>确认箱数和每箱数量后，按最新 PA 模板生成 Excel。</p></div><div className="order-summary"><span>{selected.length} 个款式</span><b>{totalCartons} 箱 / {totalPieces} 个</b>{hasPricedSelection && <strong>¥{totalAmount.toLocaleString("zh-CN", { minimumFractionDigits: 2 })}</strong>}</div></div>
         <div className="order-layout">
           <div className="order-list">{selected.length ? selected.map((product, index) => {
             const order = orderFor(product);
@@ -426,7 +463,7 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
               <div className="order-name"><b>{product.name}</b><small>{product.sku} · {product.category}</small></div>
               <label className="compact-field"><span>箱数</span><input type="number" min="0" value={order.cartons} onChange={(event) => setOrder(product, { cartons: Math.max(0, Math.floor(Number(event.target.value) || 0)) })} /></label>
               <label className="compact-field"><span>每箱</span><select value={order.unitsPerCarton} onChange={(event) => setOrder(product, { unitsPerCarton: Number(event.target.value) })}>{packOptions.map((option) => <option key={option}>{option}</option>)}</select></label>
-              <div className="line-total"><small>{order.cartons * order.unitsPerCarton} 个</small>¥{(order.cartons * order.unitsPerCarton * Number(product.price)).toFixed(2)}</div>
+              <div className="line-total"><small>{order.cartons * order.unitsPerCarton} 个</small>{Number(product.price) > 0 ? `¥${(order.cartons * order.unitsPerCarton * Number(product.price)).toFixed(2)}` : "未填价格"}</div>
             </div>;
           }) : <div className="empty"><b>订货单还是空的</b><p>先去商品选品页填写要订购的箱数。</p><button onClick={() => setView("catalog")}>去选商品</button></div>}</div>
           <aside className="customer-card"><h2>采购商资料</h2><label>采购商名称<input value={customer.name} onChange={(event) => setCustomer({ ...customer, name: event.target.value })} placeholder="将填写到模板的采购商栏" /></label><label>联系电话<input value={customer.phone} onChange={(event) => setCustomer({ ...customer, phone: event.target.value })} placeholder="将填写到模板的电话栏" /></label><div className="template-note"><b>严格使用最新 PA 模板</b><span>保留原表头、列宽、框线、公式和说明，并把商品图片写入“图片”列。</span></div><button className="export" onClick={exportExcel} disabled={exporting}>{exporting ? "正在生成含图片的 Excel…" : "下载 PA 格式 Excel"}<span>↓</span></button></aside>
@@ -507,7 +544,7 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
         </form>
       </section>}
 
-      {selected.length > 0 && view === "catalog" && <button className="floating-order" onClick={() => setView("order")}><span><b>{selected.length}</b> 款 · {totalCartons} 箱 · {totalPieces} 个</span><strong>查看订货单　¥{totalAmount.toFixed(2)} →</strong></button>}
+      {selected.length > 0 && view === "catalog" && <button className="floating-order" onClick={() => setView("order")}><span><b>{selected.length}</b> 款 · {totalCartons} 箱 · {totalPieces} 个</span><strong>生成 Excel{hasPricedSelection ? `　¥${totalAmount.toFixed(2)}` : ""} →</strong></button>}
       {lightbox?.image_key && <div className="lightbox" role="dialog" aria-modal="true" aria-label={`查看${lightbox.name}`} onClick={() => setLightbox(null)}>
         <div className="lightbox-panel" onClick={(event) => event.stopPropagation()}>
           <button type="button" className="lightbox-close" onClick={() => setLightbox(null)} aria-label="关闭大图">×</button>
