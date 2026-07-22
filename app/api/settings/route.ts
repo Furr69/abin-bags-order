@@ -36,7 +36,8 @@ function isAdmin(request: Request) {
   return Boolean(adminEmail && userEmail && adminEmail === userEmail);
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  if (!isAdmin(request)) return Response.json({ error: "没有管理权限" }, { status: 403 });
   try {
     const { DB } = runtime();
     await ensureSettingsTable(DB);

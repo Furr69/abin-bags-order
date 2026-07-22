@@ -1,5 +1,5 @@
-import CatalogApp from "./CatalogApp";
+import { redirect } from "next/navigation";
 
 export default function Home() {
-  return <CatalogApp />;
+  redirect("/manage");
 }

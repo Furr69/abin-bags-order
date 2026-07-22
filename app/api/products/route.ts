@@ -34,7 +34,8 @@ async function ensureProductsTable(db: D1Database) {
   }
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  if (!isAdmin(request)) return Response.json({ error: "没有管理权限" }, { status: 403 });
   try {
     const { DB } = runtime();
     await ensureProductsTable(DB);
@@ -52,18 +53,23 @@ export async function POST(request: Request) {
     await ensureProductsTable(DB);
     const form = await request.formData();
     const value = (key: string) => String(form.get(key) ?? "").trim();
-    const sku = value("sku");
-    const name = value("name");
-    const price = Number(value("price"));
+    const image = form.get("image");
+    if (!(image instanceof File) || image.size === 0) {
+      return Response.json({ error: "请选择一张商品图片" }, { status: 400 });
+    }
+    const imageLabel = image.name.replace(/\.[^.]+$/, "").trim();
+    const sku = value("sku") || `IMG-${Date.now().toString(36).toUpperCase()}`;
+    const name = value("name") || imageLabel || "商品图片";
+    const priceText = value("price");
+    const price = priceText === "" ? 0 : Number(priceText);
     const packingQuantity = Number(value("packingQuantity"));
-    if (!sku || !name || !Number.isFinite(price) || price < 0) {
-      return Response.json({ error: "请填写货号、品名和有效价格" }, { status: 400 });
+    if (!Number.isFinite(price) || price < 0) {
+      return Response.json({ error: "价格需要是有效的非负数，也可以留空" }, { status: 400 });
     }
     if (!packOptions.includes(packingQuantity)) {
       return Response.json({ error: "每箱数量只能选择 50、60、70、80、90 或 100" }, { status: 400 });
     }
 
-    const image = form.get("image");
     let imageKey: string | null = null;
     if (image instanceof File && image.size > 0) {
       if (!image.type.startsWith("image/") || image.size > 12 * 1024 * 1024) {
@@ -101,13 +107,14 @@ export async function PUT(request: Request) {
     const id = Number(value("id"));
     const sku = value("sku");
     const name = value("name");
-    const price = Number(value("price"));
+    const priceText = value("price");
+    const price = priceText === "" ? 0 : Number(priceText);
     const packingQuantity = Number(value("packingQuantity"));
     if (!Number.isInteger(id) || id < 1) {
       return Response.json({ error: "商品无效" }, { status: 400 });
     }
     if (!sku || !name || !Number.isFinite(price) || price < 0) {
-      return Response.json({ error: "请填写货号、品名和有效价格" }, { status: 400 });
+      return Response.json({ error: "请填写货号和品名；价格可留空" }, { status: 400 });
     }
     if (!packOptions.includes(packingQuantity)) {
       return Response.json({ error: "每箱数量只能选择 50、60、70、80、90 或 100" }, { status: 400 });

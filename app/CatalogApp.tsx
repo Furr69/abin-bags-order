@@ -87,6 +87,7 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
   const [settingsDraft, setSettingsDraft] = useState<SiteSettings>(defaultSettings);
   const [imagePreview, setImagePreview] = useState("");
   const [imageName, setImageName] = useState("");
+  const [lightbox, setLightbox] = useState<Product | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
 
   const loadProducts = async () => {
@@ -116,6 +117,14 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
 
   useEffect(() => { void loadProducts(); void loadSettings(); }, []);
   useEffect(() => () => { if (imagePreview) URL.revokeObjectURL(imagePreview); }, [imagePreview]);
+  useEffect(() => {
+    if (!lightbox) return;
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setLightbox(null); };
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", closeOnEscape);
+    return () => { document.body.style.overflow = previousOverflow; window.removeEventListener("keydown", closeOnEscape); };
+  }, [lightbox]);
 
   const categories = useMemo(() => ["全部分类", ...Array.from(new Set(products.map((product) => product.category || "未分类")))], [products]);
   const filtered = useMemo(() => products.filter((product) => {
@@ -255,7 +264,7 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
       setImagePreview("");
       setImageName("");
       await loadProducts();
-      setNotice("商品已加入商品库");
+      setNotice("图片已保存到图片库");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "保存失败");
     } finally { setLoading(false); }
@@ -323,22 +332,19 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
   return (
     <main className="catalog-app" style={themeStyle}>
       <header className="topbar">
-        <button className="brand" onClick={() => setView("catalog")} aria-label="返回商品选品">
+        <button className="brand" onClick={() => setView("catalog")} aria-label="返回图片库">
           <span className="brand-mark">AB</span><span><b>{settings.brandName}</b><small>{settings.brandSubtitle}</small></span>
         </button>
         <nav aria-label="主要导航">
-          <button className={view === "catalog" ? "active" : ""} onClick={() => setView("catalog")}>商品选品</button>
-          <button className={view === "order" ? "active" : ""} onClick={() => setView("order")}>订货单 <em>{selected.length}</em></button>
-          {adminMode && <button className={view === "admin" ? "active" : ""} onClick={() => setView("admin")}>商品管理</button>}
-          {adminMode && <button className={view === "appearance" ? "active" : ""} onClick={() => setView("appearance")}>页面设置</button>}
-          {!adminMode && <a className="owner-link" href="/manage">店主管理</a>}
+          <button className={view === "catalog" ? "active" : ""} onClick={() => setView("catalog")}>图片库</button>
+          <button className={view === "admin" ? "active" : ""} onClick={() => setView("admin")}>上传图片</button>
         </nav>
       </header>
 
       {view === "catalog" && <>
         <section className="hero">
-          <div><span className="eyebrow">{settings.heroEyebrow}</span><h1>{settings.heroTitle}</h1><p>{settings.heroDescription}</p></div>
-          <div className="hero-card"><span>线上商品库</span><strong>{products.length}<small> 款</small></strong><i>女包 · 背包 · 旅行包</i></div>
+          <div><span className="eyebrow">PRIVATE PHOTO ARCHIVE</span><h1>我的商品图片库</h1><p>所有图片仅店主账号可见，点击任意图片即可放大查看或保存到电脑。</p></div>
+          <div className="hero-card"><span>已保存图片</span><strong>{products.filter((product) => product.image_key).length}<small> 张</small></strong><i>安全保存 · 随时查看</i></div>
         </section>
         <section className="catalog-shell">
           <div className="toolbar">
@@ -346,22 +352,17 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
             <div className="result-count">共 <b>{filtered.length}</b> 款商品</div>
           </div>
           <div className="chips">{categories.map((category) => <button key={category} className={categoryFilter === category ? "selected" : ""} onClick={() => setCategoryFilter(category)}>{category}</button>)}</div>
-          {products.length === 0 ? <div className="empty catalog-empty"><b>商品库正在准备中</b><p>店主正在上传商品图片和资料，请稍后再来。</p>{adminMode && <button onClick={() => setView("admin")}>去上传商品</button>}</div> :
+          {products.length === 0 ? <div className="empty catalog-empty"><b>图片库还是空的</b><p>去上传第一张商品图片吧。</p>{adminMode && <button onClick={() => setView("admin")}>去上传商品</button>}</div> :
           <div className="product-grid">{filtered.map((product, index) => {
-            const order = orderFor(product);
             return <article className="product-card" key={product.id}>
-              <div className={`product-image ${palettes[index % palettes.length]}`}>
+              <button type="button" className={`product-image image-zoom ${palettes[index % palettes.length]}`} onClick={() => product.image_key && setLightbox(product)} disabled={!product.image_key} aria-label={product.image_key ? `放大查看${product.name}` : `${product.name}暂无图片`}>
                 {product.image_key ? <img src={`/api/images/${product.image_key}`} alt={product.name} /> : <><span className="bag-shape">◡</span><small>暂无商品图片</small></>}
                 <span className="sku">{product.sku}</span>
-              </div>
+                {product.image_key && <span className="zoom-hint">点击放大</span>}
+              </button>
               <div className="product-info">
-                <div className="title-row"><div><h3>{product.name}</h3><p>{product.category} · {product.model || product.style || "箱包"}</p></div><strong>¥{Number(product.price).toFixed(2)}</strong></div>
+                <div className="title-row"><div><h3>{product.name}</h3><p>{product.category} · {product.model || product.style || "箱包"}</p></div>{Number(product.price) > 0 && <strong>¥{Number(product.price).toFixed(2)}</strong>}</div>
                 <div className="meta"><span>{product.material || "材质待补充"}</span><span>{product.size || "尺寸待补充"}</span><span>{product.notes || "现货款"}</span></div>
-                <div className="shipping-control">
-                  <label><span>订购箱数</span><input type="number" min="0" step="1" value={order.cartons || ""} placeholder="填箱数" onChange={(event) => setOrder(product, { cartons: Math.max(0, Math.floor(Number(event.target.value) || 0)) })} /></label>
-                  <label><span>每箱数量</span><select value={order.unitsPerCarton} onChange={(event) => setOrder(product, { unitsPerCarton: Number(event.target.value) })}>{packOptions.map((option) => <option key={option} value={option}>{option} 个</option>)}</select></label>
-                </div>
-                {order.cartons > 0 && <div className="calculated">{order.cartons} 箱 × {order.unitsPerCarton} 个 = <b>{order.cartons * order.unitsPerCarton} 个</b></div>}
               </div>
             </article>;
           })}</div>}
@@ -386,10 +387,10 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
       </section>}
 
       {view === "admin" && <section className="admin-page">
-        <div className="section-heading"><div><span className="eyebrow">PRODUCT MANAGER</span><h1>商品管理</h1><p>上传新商品，也可以在下方编辑全部资料、更换照片或删除商品。</p></div><div className="admin-note">每箱数量只能选择 50、60、70、80、90、100。图片会自动适配 Excel 图片格。</div></div>
+        <div className="section-heading"><div><span className="eyebrow">UPLOAD PHOTOS</span><h1>上传商品图片</h1><p>只选一张图片就能保存；名称会默认使用图片文件名，其余资料都可选填。</p></div><div className="admin-note">图片会长期保存在你的私人图片库中，之后可放大查看或保存到电脑。</div></div>
         <form className="product-form" onSubmit={submitProduct}>
           <div className={`image-upload ${imagePreview ? "has-image" : ""}`}>
-            <input ref={imageInputRef} className="image-file-input" id="product-image-input" type="file" name="image" accept="image/jpeg,image/png,image/webp" onChange={(event) => {
+            <input ref={imageInputRef} className="image-file-input" id="product-image-input" type="file" name="image" required accept="image/jpeg,image/png,image/webp" onChange={(event) => {
               const file = event.target.files?.[0];
               if (imagePreview) URL.revokeObjectURL(imagePreview);
               if (!file) { setImagePreview(""); setImageName(""); return; }
@@ -397,22 +398,22 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
               setImageName(file.name);
             }} />
             <button className="image-picker-trigger" type="button" onClick={() => imageInputRef.current?.click()}>
-              {imagePreview ? <><img className="upload-preview" src={imagePreview} alt="待上传商品预览" /><span className="change-image">更换照片</span><b>{imageName}</b><small>照片已选择，填写资料后点击保存</small></> : <><span className="upload-plus">＋</span><b>选择商品照片</b><small>JPG、PNG、WebP，不超过 12MB</small></>}
+              {imagePreview ? <><img className="upload-preview" src={imagePreview} alt="待上传商品预览" /><span className="change-image">更换照片</span><b>{imageName}</b><small>照片已选择，可直接点击保存</small></> : <><span className="upload-plus">＋</span><b>选择商品照片</b><small>JPG、PNG、WebP，不超过 12MB</small></>}
             </button>
           </div>
           <div className="form-fields"><div className="form-grid">
-            <label>工厂货号 *<input name="sku" required placeholder="如 8057#" /></label><label>中文名称 *<input name="name" required placeholder="如 女包" /></label>
+            <label>工厂货号（选填）<input name="sku" placeholder="不填会自动生成" /></label><label>图片名称（选填）<input name="name" placeholder="默认使用图片文件名" /></label>
             <label>客人货号/型号<input name="model" placeholder="选填" /></label><label>款式<input name="style" placeholder="如 单肩包" /></label>
-            <label>单价 *<input name="price" required min="0" step="0.01" type="number" placeholder="0.00" /></label><label>箱包分类<input name="category" list="category-options" defaultValue="女包" /><datalist id="category-options">{suggestedCategories.map((category) => <option key={category} value={category} />)}</datalist></label>
+            <label>单价（选填）<input name="price" min="0" step="0.01" type="number" placeholder="可以不填" /></label><label>箱包分类<input name="category" list="category-options" defaultValue="女包" /><datalist id="category-options">{suggestedCategories.map((category) => <option key={category} value={category} />)}</datalist></label>
             <label>材质<input name="material" placeholder="如 PU+涤纶内里" /></label><label>规格/尺寸<input name="size" placeholder="选填" /></label>
             <label>每箱数量<select name="packingQuantity" defaultValue="100">{packOptions.map((option) => <option key={option} value={option}>{option} 个</option>)}</select></label><label>单箱体积 m³<input name="cartonVolume" min="0" step="0.001" type="number" placeholder="如 0.200" /></label>
             <label>现有库存<input name="stock" min="0" type="number" defaultValue="0" /></label>
-          </div><label>备注<textarea name="notes" placeholder="颜色、包装要求等" /></label><button className="save-product" disabled={loading}>{loading ? "正在保存…" : "保存并发布商品"}</button></div>
+          </div><label>备注<textarea name="notes" placeholder="颜色、包装要求等" /></label><button className="save-product" disabled={loading}>{loading ? "正在保存…" : "保存图片"}</button></div>
         </form>
-        <div className="manage-list"><h2>已发布商品 <small>（{products.length}）</small></h2>{products.length ? products.map((product) => editingId === product.id ?
+        <div className="manage-list"><h2>已保存图片 <small>（{products.length}）</small></h2>{products.length ? products.map((product) => editingId === product.id ?
           <form className="manage-editor" key={product.id} onSubmit={(event) => updateProduct(event, product)}>
             <div className="editor-image">
-              <span className="editor-thumb">{product.image_key ? <img src={`/api/images/${product.image_key}`} alt={product.name} /> : "AB"}</span>
+              <button type="button" className="editor-thumb image-zoom" onClick={() => product.image_key && setLightbox(product)}>{product.image_key ? <img src={`/api/images/${product.image_key}`} alt={product.name} /> : "AB"}</button>
               <label className="replace-photo">更换商品照片<input type="file" name="image" accept="image/jpeg,image/png,image/webp" /></label>
               <small>不选择新照片则保留原照片</small>
             </div>
@@ -420,7 +421,7 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
               <div className="form-grid">
                 <label>工厂货号 *<input name="sku" required defaultValue={product.sku} /></label><label>中文名称 *<input name="name" required defaultValue={product.name} /></label>
                 <label>客人货号/型号<input name="model" defaultValue={product.model} /></label><label>款式<input name="style" defaultValue={product.style} /></label>
-                <label>单价 *<input name="price" required min="0" step="0.01" type="number" defaultValue={product.price} /></label><label>箱包分类<input name="category" list="category-options" defaultValue={product.category || "女包"} /></label>
+                <label>单价（选填）<input name="price" min="0" step="0.01" type="number" defaultValue={Number(product.price) || ""} /></label><label>箱包分类<input name="category" list="category-options" defaultValue={product.category || "女包"} /></label>
                 <label>材质<input name="material" defaultValue={product.material} /></label><label>规格/尺寸<input name="size" defaultValue={product.size} /></label>
                 <label>每箱数量<select name="packingQuantity" defaultValue={defaultPack(product)}>{packOptions.map((option) => <option key={option} value={option}>{option} 个</option>)}</select></label><label>单箱体积 m³<input name="cartonVolume" min="0" step="0.001" type="number" defaultValue={Number(product.carton_volume) || ""} /></label>
                 <label>现有库存<input name="stock" min="0" type="number" defaultValue={product.stock} /></label>
@@ -430,8 +431,8 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
             </div>
           </form> :
           <div className="manage-product-summary" key={product.id}>
-            <span className="manage-thumb">{product.image_key ? <img src={`/api/images/${product.image_key}`} alt="" /> : "AB"}</span>
-            <div className="manage-name"><b>{product.name}</b><small>{product.sku} · {product.category} · ¥{Number(product.price).toFixed(2)} · 每箱 {defaultPack(product)} 个</small></div>
+            <button type="button" className="manage-thumb image-zoom" onClick={() => product.image_key && setLightbox(product)}>{product.image_key ? <img src={`/api/images/${product.image_key}`} alt={`放大查看${product.name}`} /> : "AB"}</button>
+            <div className="manage-name"><b>{product.name}</b><small>{product.sku} · {product.category}{Number(product.price) > 0 ? ` · ¥${Number(product.price).toFixed(2)}` : ""}</small></div>
             <button className="edit-row" onClick={() => setEditingId(product.id)}>编辑全部信息/更换照片</button><button className="delete-row" onClick={() => deleteProduct(product)}>删除商品</button>
           </div>) : <div className="manage-empty">还没有商品，请使用上方表单添加。</div>}</div>
       </section>}
@@ -460,8 +461,15 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
       </section>}
 
       {selected.length > 0 && view === "catalog" && <button className="floating-order" onClick={() => setView("order")}><span><b>{selected.length}</b> 款 · {totalCartons} 箱 · {totalPieces} 个</span><strong>查看订货单　¥{totalAmount.toFixed(2)} →</strong></button>}
+      {lightbox?.image_key && <div className="lightbox" role="dialog" aria-modal="true" aria-label={`查看${lightbox.name}`} onClick={() => setLightbox(null)}>
+        <div className="lightbox-panel" onClick={(event) => event.stopPropagation()}>
+          <button type="button" className="lightbox-close" onClick={() => setLightbox(null)} aria-label="关闭大图">×</button>
+          <img src={`/api/images/${lightbox.image_key}`} alt={lightbox.name} />
+          <div className="lightbox-actions"><div><b>{lightbox.name}</b><small>{lightbox.sku}</small></div><a href={`/api/images/${lightbox.image_key}`} download={`${lightbox.sku || lightbox.name}.${lightbox.image_key.split(".").pop() || "jpg"}`}>保存到电脑 ↓</a></div>
+        </div>
+      </div>}
       {notice && <button className="toast" onClick={() => setNotice("")}>{notice}<span>×</span></button>}
-      <footer><span>{settings.brandName} · 线上选品订货</span><small>商品资料以最终确认为准</small></footer>
+      <footer><span>{settings.brandName} · 私人商品图片库</span><small>仅店主账号可访问</small></footer>
     </main>
   );
 }

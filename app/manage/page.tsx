@@ -16,7 +16,7 @@ export default async function ManagePage() {
           <h1>这个账号没有管理权限</h1>
           <p>请使用店主的 ChatGPT 账号登录。</p>
           <a href={chatGPTSignOutPath("/manage")}>更换账号</a>
-          <a className="secondary-link" href="/">返回商品页</a>
+          <a className="secondary-link" href={chatGPTSignOutPath("/manage")}>退出登录</a>
         </div>
       </main>
     );
