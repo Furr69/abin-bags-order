@@ -25,6 +25,9 @@ test("ships a private photo library with optional prices and full-size downloads
   assert.match(catalog, /name="image" required/);
   assert.match(catalog, /className="lightbox"/);
   assert.match(catalog, /保存到电脑/);
+  assert.match(catalog, /const maxUploadBytes = 1_500_000/);
+  assert.match(catalog, /optimizeImageForUpload/);
+  assert.match(catalog, /response.status === 413/);
   assert.match(catalog, /imageInputRef\.current\?\.click\(\)/);
   assert.match(catalog, /imageToExcelDataUrl/);
   assert.match(catalog, /canvas\.width = 900/);

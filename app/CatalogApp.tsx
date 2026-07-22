@@ -49,6 +49,49 @@ const suggestedCategories = ["女包", "男包", "双肩包", "旅行包", "钱�
 const defaultPack = (product: Product) => packOptions.includes(Number(product.packing_quantity)) ? Number(product.packing_quantity) : 100;
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
+const maxUploadBytes = 1_500_000;
+
+async function optimizeImageForUpload(file: File) {
+  if (file.size <= maxUploadBytes) return file;
+  const bitmap = await createImageBitmap(file);
+  const longestSide = Math.max(bitmap.width, bitmap.height);
+  let maxSide = Math.min(2000, longestSide);
+  let output: Blob | null = null;
+
+  for (let attempt = 0; attempt < 7; attempt++) {
+    const scale = Math.min(1, maxSide / longestSide);
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    const context = canvas.getContext("2d");
+    if (!context) break;
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = "high";
+    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    const quality = Math.max(0.56, 0.84 - attempt * 0.05);
+    output = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", quality));
+    if (output && output.size <= maxUploadBytes) break;
+    maxSide *= 0.82;
+  }
+
+  bitmap.close();
+  if (!output) throw new Error("图片处理失败，请换一张图片重试");
+  const baseName = file.name.replace(/\.[^.]+$/, "") || "product";
+  return new File([output], `${baseName}.jpg`, { type: "image/jpeg", lastModified: Date.now() });
+}
+
+async function readApiResponse(response: Response) {
+  const body = await response.text();
+  if (response.status === 413) return { error: "图片仍然太大，请换一张图片重试" };
+  try {
+    return JSON.parse(body) as { error?: string };
+  } catch {
+    return { error: body || "服务器返回了无法识别的内容" };
+  }
+}
+
 async function imageToExcelDataUrl(url: string) {
   const response = await fetch(url);
   if (!response.ok) throw new Error("商品图片读取失败");
@@ -257,8 +300,10 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
     setNotice("");
     const form = new FormData(formElement);
     try {
+      const image = form.get("image");
+      if (image instanceof File && image.size > 0) form.set("image", await optimizeImageForUpload(image));
       const response = await fetch("/api/products", { method: "POST", body: form });
-      const data = await response.json() as { error?: string };
+      const data = await readApiResponse(response);
       if (!response.ok) throw new Error(data.error || "保存失败");
       formElement.reset();
       setImagePreview("");
@@ -277,8 +322,10 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
     try {
       const form = new FormData(event.currentTarget);
       form.set("id", String(product.id));
+      const image = form.get("image");
+      if (image instanceof File && image.size > 0) form.set("image", await optimizeImageForUpload(image));
       const response = await fetch("/api/products", { method: "PUT", body: form });
-      const data = await response.json() as { error?: string };
+      const data = await readApiResponse(response);
       if (!response.ok) throw new Error(data.error || "修改失败");
       await loadProducts();
       setEditingId(null);
