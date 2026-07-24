@@ -23,6 +23,7 @@ async function ensureProductsTable(db: D1Database) {
     model TEXT NOT NULL DEFAULT '',
     style TEXT NOT NULL DEFAULT '',
     category TEXT NOT NULL DEFAULT '女包',
+    factory TEXT NOT NULL DEFAULT '',
     price REAL NOT NULL DEFAULT 0,
     material TEXT NOT NULL DEFAULT '',
     size TEXT NOT NULL DEFAULT '',
@@ -36,6 +37,9 @@ async function ensureProductsTable(db: D1Database) {
   const columns = await db.prepare("PRAGMA table_info(products)").all<{ name: string }>();
   if (!columns.results.some((column) => column.name === "carton_volume")) {
     await db.prepare("ALTER TABLE products ADD COLUMN carton_volume REAL NOT NULL DEFAULT 0").run();
+  }
+  if (!columns.results.some((column) => column.name === "factory")) {
+    await db.prepare("ALTER TABLE products ADD COLUMN factory TEXT NOT NULL DEFAULT ''").run();
   }
 }
 
@@ -62,9 +66,10 @@ export async function POST(request: Request) {
     if (!(image instanceof File) || image.size === 0) {
       return Response.json({ error: "请选择一张商品图片" }, { status: 400 });
     }
-    const imageLabel = image.name.replace(/\.[^.]+$/, "").trim();
     const sku = normalizeSku(value("sku"));
-    const name = value("name") || imageLabel || "商品图片";
+    const name = value("name") || sku || "商品图片";
+    const factory = value("factory");
+    if (!factory) return Response.json({ error: "请填写厂家" }, { status: 400 });
     if (!sku) return Response.json({ error: "货号只能填写数字，系统会自动加 #" }, { status: 400 });
     const priceText = value("price");
     const price = priceText === "" ? 0 : Number(priceText);
@@ -89,10 +94,10 @@ export async function POST(request: Request) {
     }
 
     const result = await DB.prepare(`INSERT INTO products
-      (sku, name, model, style, category, price, material, size, packing_quantity, carton_volume, stock, notes, image_key)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      (sku, name, model, style, category, factory, price, material, size, packing_quantity, carton_volume, stock, notes, image_key)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .bind(
-        sku, name, value("model"), value("style"), value("category") || "女包", price,
+        sku, name, value("model"), value("style"), value("category") || "女包", factory, price,
         value("material"), value("size"), packingQuantity,
         Math.max(0, Number(value("cartonVolume")) || 0),
         Math.max(0, Number(value("stock")) || 0), value("notes"), imageKey,
@@ -115,6 +120,7 @@ export async function PUT(request: Request) {
     const id = Number(value("id"));
     const sku = normalizeSku(value("sku"));
     const name = value("name");
+    const factory = value("factory");
     const priceText = value("price");
     const price = priceText === "" ? 0 : Number(priceText);
     const packingQuantity = Number(value("packingQuantity"));
@@ -122,6 +128,7 @@ export async function PUT(request: Request) {
       return Response.json({ error: "商品无效" }, { status: 400 });
     }
     if (!sku) return Response.json({ error: "货号只能填写数字，系统会自动加 #" }, { status: 400 });
+    if (!factory) return Response.json({ error: "请填写厂家" }, { status: 400 });
     if (!name || !Number.isFinite(price) || price < 0) {
       return Response.json({ error: "请填写品名；价格可留空" }, { status: 400 });
     }
@@ -145,11 +152,11 @@ export async function PUT(request: Request) {
     }
 
     await DB.prepare(`UPDATE products SET
-      sku = ?, name = ?, model = ?, style = ?, category = ?, price = ?, material = ?, size = ?,
+      sku = ?, name = ?, model = ?, style = ?, category = ?, factory = ?, price = ?, material = ?, size = ?,
       packing_quantity = ?, carton_volume = ?, stock = ?, notes = ?, image_key = ?
       WHERE id = ?`)
       .bind(
-        sku, name, value("model"), value("style"), value("category") || "女包", price,
+        sku, name, value("model"), value("style"), value("category") || "女包", factory, price,
         value("material"), value("size"), packingQuantity,
         Math.max(0, Number(value("cartonVolume")) || 0),
         Math.max(0, Number(value("stock")) || 0), value("notes"),

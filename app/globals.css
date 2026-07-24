@@ -121,6 +121,27 @@ nav button { height:100%; }
 .price-input i { padding-left:9px; color:var(--accent-dark); font-style:normal; font-weight:700; }
 .price-input input { width:100%; min-width:0; height:100%; border:0; outline:0; padding:0 7px 0 3px; background:transparent; color:var(--ink); font-size:13px; }
 .price-input input:disabled { opacity:.6; }
+.factory-filter { display:flex; align-items:center; gap:14px; border-bottom:1px solid var(--line); }
+.factory-filter>span { flex:none; color:var(--accent-dark); font-size:11px; font-weight:800; }
+.factory-filter .chips { padding:14px 0; }
+.factory-tag { background:#e8efe3 !important; color:#41643a !important; font-weight:800; }
+.batch-product-form { align-items:start; }
+.batch-upload-fields { min-width:0; }
+.batch-common-fields { margin-bottom:16px; }
+.batch-upload-list { max-height:540px; overflow:auto; display:grid; gap:10px; padding:4px 3px 14px 0; }
+.batch-upload-item { display:grid; grid-template-columns:72px 1fr 32px; gap:12px; align-items:center; padding:10px; border:1px solid var(--line); border-radius:13px; background:#fbfaf8; }
+.batch-upload-item>img { width:72px; height:72px; object-fit:cover; border-radius:9px; background:#eee5de; }
+.batch-upload-item b { display:block; overflow:hidden; color:var(--ink); font-size:11px; white-space:nowrap; text-overflow:ellipsis; }
+.batch-upload-item label { display:flex; align-items:center; gap:8px; margin-top:7px; color:var(--muted); font-size:10px; }
+.batch-upload-item input { width:150px; height:34px; border:1px solid var(--line); border-radius:8px; padding:0 10px; background:#fff; }
+.batch-upload-item small { display:block; margin-top:5px; color:var(--muted); font-size:9px; }
+.batch-upload-item>button { width:30px; height:30px; border:0; border-radius:50%; background:#f5e6e2; color:#a43f30; cursor:pointer; font-size:18px; }
+@media (max-width:640px) {
+  .factory-filter { align-items:flex-start; flex-direction:column; gap:0; padding-top:14px; }
+  .batch-upload-item { grid-template-columns:58px 1fr 28px; gap:8px; }
+  .batch-upload-item>img { width:58px; height:58px; }
+  .batch-upload-item input { width:125px; }
+}
 /* Private photo library and full-size image viewer */
 .image-zoom { border:0; padding:0; cursor:zoom-in; font:inherit; }
 .product-image.image-zoom { width:100%; }

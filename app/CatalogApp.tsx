@@ -9,6 +9,7 @@ type Product = {
   model: string;
   style: string;
   category: string;
+  factory: string;
   price: number;
   material: string;
   size: string;
@@ -20,6 +21,7 @@ type Product = {
 };
 
 type OrderLine = { cartons: number; unitsPerCarton: number };
+type UploadItem = { id: string; file: File; preview: string; sku: string; recognizing: boolean };
 type SiteSettings = {
   brandName: string;
   brandSubtitle: string;
@@ -119,6 +121,7 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
   const [products, setProducts] = useState<Product[]>([]);
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("全部分类");
+  const [factoryFilter, setFactoryFilter] = useState("全部厂家");
   const [orders, setOrders] = useState<Record<number, OrderLine>>({});
   const [editingId, setEditingId] = useState<number | null>(null);
   const [view, setView] = useState<"catalog" | "order" | "admin" | "appearance">(adminMode ? "admin" : "catalog");
@@ -128,8 +131,8 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
   const [customer, setCustomer] = useState({ name: "", phone: "" });
   const [settings, setSettings] = useState<SiteSettings>(defaultSettings);
   const [settingsDraft, setSettingsDraft] = useState<SiteSettings>(defaultSettings);
-  const [imagePreview, setImagePreview] = useState("");
-  const [imageName, setImageName] = useState("");
+  const [uploadItems, setUploadItems] = useState<UploadItem[]>([]);
+  const [uploadProgress, setUploadProgress] = useState("");
   const [lightbox, setLightbox] = useState<Product | null>(null);
   const [priceDrafts, setPriceDrafts] = useState<Record<number, string>>({});
   const [savingPriceId, setSavingPriceId] = useState<number | null>(null);
@@ -161,7 +164,6 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
   };
 
   useEffect(() => { void loadProducts(); void loadSettings(); }, []);
-  useEffect(() => () => { if (imagePreview) URL.revokeObjectURL(imagePreview); }, [imagePreview]);
   useEffect(() => {
     if (!lightbox) return;
     const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setLightbox(null); };
@@ -172,10 +174,13 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
   }, [lightbox]);
 
   const categories = useMemo(() => ["全部分类", ...Array.from(new Set(products.map((product) => product.category || "未分类")))], [products]);
+  const factories = useMemo(() => ["全部厂家", ...Array.from(new Set(products.map((product) => product.factory || "未标厂家")))], [products]);
   const filtered = useMemo(() => products.filter((product) => {
-    const haystack = `${product.sku} ${product.name} ${product.model} ${product.style} ${product.category}`.toLowerCase();
-    return haystack.includes(search.toLowerCase()) && (categoryFilter === "全部分类" || product.category === categoryFilter);
-  }), [products, search, categoryFilter]);
+    const haystack = `${product.sku} ${product.name} ${product.model} ${product.style} ${product.category} ${product.factory}`.toLowerCase();
+    return haystack.includes(search.toLowerCase())
+      && (categoryFilter === "全部分类" || product.category === categoryFilter)
+      && (factoryFilter === "全部厂家" || (product.factory || "未标厂家") === factoryFilter);
+  }), [products, search, categoryFilter, factoryFilter]);
 
   const orderFor = (product: Product): OrderLine => orders[product.id] ?? { cartons: 0, unitsPerCarton: defaultPack(product) };
   const setOrder = (product: Product, patch: Partial<OrderLine>) => setOrders((current) => {
@@ -254,7 +259,7 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
         row.getCell("M").value = hasPrice ? { formula: `H${rowNumber}*L${rowNumber}`, result: amount } : null;
         row.getCell("N").value = Number(product.carton_volume || 0) || null;
         row.getCell("O").value = { formula: `I${rowNumber}*N${rowNumber}`, result: totalVolume };
-        row.getCell("P").value = product.notes;
+        row.getCell("P").value = [product.factory ? `厂家：${product.factory}` : "", product.notes].filter(Boolean).join("；");
 
         if (product.image_key) {
           try {
@@ -297,26 +302,95 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
     }
   };
 
+  const chooseUploadFiles = async (files: File[]) => {
+    uploadItems.forEach((item) => URL.revokeObjectURL(item.preview));
+    const nextItems = files.map((file, index) => ({
+      id: `${file.name}-${file.lastModified}-${index}`,
+      file,
+      preview: URL.createObjectURL(file),
+      sku: "",
+      recognizing: true,
+    }));
+    setUploadItems(nextItems);
+    setUploadProgress(files.length ? "正在识别照片中的 # 货号…" : "");
+    if (!files.length) return;
+
+    try {
+      const { createWorker } = await import("tesseract.js");
+      const worker = await createWorker("eng");
+      try {
+        await worker.setParameters({ tessedit_char_whitelist: "0123456789#" });
+        for (let index = 0; index < nextItems.length; index++) {
+          const item = nextItems[index];
+          setUploadProgress(`正在识别第 ${index + 1}/${nextItems.length} 张照片…`);
+          const result = await worker.recognize(item.file);
+          const compactText = result.data.text.replace(/\s/g, "");
+          const match = compactText.match(/(\d+)#/);
+          setUploadItems((current) => current.map((currentItem) => currentItem.id === item.id
+            ? { ...currentItem, sku: currentItem.sku || match?.[1] || "", recognizing: false }
+            : currentItem));
+        }
+      } finally {
+        await worker.terminate();
+      }
+      setUploadProgress("识别完成，请检查每张照片的货号");
+    } catch {
+      setUploadItems((current) => current.map((item) => ({ ...item, recognizing: false })));
+      setUploadProgress("自动识别未完成，请手动填写未识别的货号");
+    }
+  };
+
+  const removeUploadItem = (id: string) => {
+    setUploadItems((current) => {
+      const removed = current.find((item) => item.id === id);
+      if (removed) URL.revokeObjectURL(removed.preview);
+      return current.filter((item) => item.id !== id);
+    });
+  };
+
   const submitProduct = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const formElement = event.currentTarget;
+    if (!uploadItems.length) return setNotice("请先选择商品照片");
+    if (uploadItems.some((item) => item.recognizing)) return setNotice("请稍等，正在识别照片货号");
+    if (uploadItems.some((item) => !item.sku.trim())) return setNotice("请填写所有未识别到的货号");
     setLoading(true);
     setNotice("");
-    const form = new FormData(formElement);
+    const baseForm = new FormData(formElement);
+    const failures: string[] = [];
+    let saved = 0;
     try {
-      const image = form.get("image");
-      if (image instanceof File && image.size > 0) form.set("image", await optimizeImageForUpload(image));
-      const response = await fetch("/api/products", { method: "POST", body: form });
-      const data = await readApiResponse(response);
-      if (!response.ok) throw new Error(data.error || "保存失败");
-      formElement.reset();
-      setImagePreview("");
-      setImageName("");
-      await loadProducts();
-      setNotice("图片已保存到图片库");
+      for (let index = 0; index < uploadItems.length; index++) {
+        const item = uploadItems[index];
+        setUploadProgress(`正在保存第 ${index + 1}/${uploadItems.length} 张照片…`);
+        const form = new FormData();
+        for (const [key, value] of baseForm.entries()) {
+          if (key !== "image" && key !== "sku" && key !== "name") form.append(key, value);
+        }
+        form.set("sku", item.sku.trim());
+        form.set("name", `${item.sku.trim()}#`);
+        form.set("image", await optimizeImageForUpload(item.file));
+        const response = await fetch("/api/products", { method: "POST", body: form });
+        const data = await readApiResponse(response);
+        if (response.ok) saved++;
+        else failures.push(`${item.sku || `第 ${index + 1} 张`}：${data.error || "保存失败"}`);
+      }
+      if (saved) await loadProducts();
+      if (!failures.length) {
+        uploadItems.forEach((item) => URL.revokeObjectURL(item.preview));
+        setUploadItems([]);
+        formElement.reset();
+        setUploadProgress("");
+        setNotice(`${saved} 张照片已保存到图片库`);
+      } else {
+        setUploadProgress("");
+        setNotice(`已保存 ${saved} 张；${failures.slice(0, 2).join("；")}`);
+      }
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "保存失败");
-    } finally { setLoading(false); }
+      setNotice(error instanceof Error ? error.message : "批量保存失败");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const updateProduct = async (event: FormEvent<HTMLFormElement>, product: Product) => {
@@ -429,6 +503,7 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
             <label className="search"><span>⌕</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索货号、品名、型号、分类…" /></label>
             <div className="result-count">共 <b>{filtered.length}</b> 款商品</div>
           </div>
+          <div className="factory-filter"><span>厂家</span><div className="chips">{factories.map((factory) => <button key={factory} className={factoryFilter === factory ? "selected" : ""} onClick={() => setFactoryFilter(factory)}>{factory}</button>)}</div></div>
           <div className="chips">{categories.map((category) => <button key={category} className={categoryFilter === category ? "selected" : ""} onClick={() => setCategoryFilter(category)}>{category}</button>)}</div>
           {products.length === 0 ? <div className="empty catalog-empty"><b>图片库还是空的</b><p>去上传第一张商品图片吧。</p>{adminMode && <button onClick={() => setView("admin")}>去上传商品</button>}</div> :
           <div className="product-grid">{filtered.map((product, index) => {
@@ -441,7 +516,7 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
               </button>
               <div className="product-info">
                 <div className="title-row"><div><h3>{product.name}</h3><p>{product.category} · {product.model || product.style || "箱包"}</p></div><label className="inline-price"><span>价格</span><span className="price-input"><i>¥</i><input type="number" min="0" step="0.01" value={priceDrafts[product.id] ?? (Number(product.price) > 0 ? String(product.price) : "")} placeholder="选填" disabled={savingPriceId === product.id} onChange={(event) => setPriceDrafts((current) => ({ ...current, [product.id]: event.target.value }))} onBlur={(event) => void saveProductPrice(product, event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} /></span></label></div>
-                <div className="meta"><span>{product.material || "材质待补充"}</span><span>{product.size || "尺寸待补充"}</span><span>{product.notes || "现货款"}</span></div>
+                <div className="meta"><span className="factory-tag">{product.factory || "未标厂家"}</span><span>{product.material || "材质待补充"}</span><span>{product.size || "尺寸待补充"}</span><span>{product.notes || "现货款"}</span></div>
                 <div className="shipping-control">
                   <label><span>订购箱数</span><input type="number" min="0" step="1" value={order.cartons || ""} placeholder="填箱数" onChange={(event) => setOrder(product, { cartons: Math.max(0, Math.floor(Number(event.target.value) || 0)) })} /></label>
                   <label><span>每箱数量</span><select value={order.unitsPerCarton} onChange={(event) => setOrder(product, { unitsPerCarton: Number(event.target.value) })}>{packOptions.map((option) => <option key={option} value={option}>{option} 个</option>)}</select></label>
@@ -460,7 +535,7 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
             const order = orderFor(product);
             return <div className="order-row carton-row" key={product.id}>
               <span className={`mini-image ${palettes[index % palettes.length]}`}>{product.image_key ? <img src={`/api/images/${product.image_key}`} alt="" /> : "AB"}</span>
-              <div className="order-name"><b>{product.name}</b><small>{product.sku} · {product.category}</small></div>
+              <div className="order-name"><b>{product.name}</b><small>{product.factory || "未标厂家"} · {product.sku} · {product.category}</small></div>
               <label className="compact-field"><span>箱数</span><input type="number" min="0" value={order.cartons} onChange={(event) => setOrder(product, { cartons: Math.max(0, Math.floor(Number(event.target.value) || 0)) })} /></label>
               <label className="compact-field"><span>每箱</span><select value={order.unitsPerCarton} onChange={(event) => setOrder(product, { unitsPerCarton: Number(event.target.value) })}>{packOptions.map((option) => <option key={option}>{option}</option>)}</select></label>
               <div className="line-total"><small>{order.cartons * order.unitsPerCarton} 个</small>{Number(product.price) > 0 ? `¥${(order.cartons * order.unitsPerCarton * Number(product.price)).toFixed(2)}` : "未填价格"}</div>
@@ -471,28 +546,28 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
       </section>}
 
       {view === "admin" && <section className="admin-page">
-        <div className="section-heading"><div><span className="eyebrow">UPLOAD PHOTOS</span><h1>上传商品图片</h1><p>选择图片后只需填写数字货号；系统会自动在末尾加 #，名称默认使用图片文件名。</p></div><div className="admin-note">图片会长期保存在你的私人图片库中，之后可放大查看或保存到电脑。</div></div>
-        <form className="product-form" onSubmit={submitProduct}>
-          <div className={`image-upload ${imagePreview ? "has-image" : ""}`}>
-            <input ref={imageInputRef} className="image-file-input" id="product-image-input" type="file" name="image" required accept="image/jpeg,image/png,image/webp" onChange={(event) => {
-              const file = event.target.files?.[0];
-              if (imagePreview) URL.revokeObjectURL(imagePreview);
-              if (!file) { setImagePreview(""); setImageName(""); return; }
-              setImagePreview(URL.createObjectURL(file));
-              setImageName(file.name);
-            }} />
+        <div className="section-heading"><div><span className="eyebrow">BATCH UPLOAD</span><h1>按厂家批量上传</h1><p>选择厂家后一次上传多张照片，系统只识别照片画面中带 # 的数字货号。</p></div><div className="admin-note">识别结果会显示在每张预览旁；保存前请检查，未识别的货号可手动填写。</div></div>
+        <form className="product-form batch-product-form" onSubmit={submitProduct}>
+          <div className={`image-upload ${uploadItems.length ? "has-image" : ""}`}>
+            <input ref={imageInputRef} className="image-file-input" id="product-image-input" type="file" name="image" multiple accept="image/jpeg,image/png,image/webp" onChange={(event) => void chooseUploadFiles(Array.from(event.target.files ?? []))} />
             <button className="image-picker-trigger" type="button" onClick={() => imageInputRef.current?.click()}>
-              {imagePreview ? <><img className="upload-preview" src={imagePreview} alt="待上传商品预览" /><span className="change-image">更换照片</span><b>{imageName}</b><small>照片已选择，可直接点击保存</small></> : <><span className="upload-plus">＋</span><b>选择商品照片</b><small>JPG、PNG、WebP，不超过 12MB</small></>}
+              {uploadItems.length ? <><img className="upload-preview" src={uploadItems[0].preview} alt="待上传商品预览" /><span className="change-image">重新选择</span><b>已选择 {uploadItems.length} 张照片</b><small>{uploadProgress || "可继续填写厂家和货号"}</small></> : <><span className="upload-plus">＋</span><b>一次选择多张商品照片</b><small>系统会自动识别照片里的数字#货号</small></>}
             </button>
           </div>
-          <div className="form-fields"><div className="form-grid">
-            <label>工厂货号 *<input name="sku" required inputMode="numeric" pattern="[0-9]+" maxLength={20} placeholder="如 8057，自动保存为 8057#" onInput={(event) => { event.currentTarget.value = event.currentTarget.value.replace(/\D/g, ""); }} /></label><label>图片名称（选填）<input name="name" placeholder="默认使用图片文件名" /></label>
-            <label>客人货号/型号<input name="model" placeholder="选填" /></label><label>款式<input name="style" placeholder="如 单肩包" /></label>
-            <label>单价（选填）<input name="price" min="0" step="0.01" type="number" placeholder="可以不填" /></label><label>箱包分类<input name="category" list="category-options" defaultValue="女包" /><datalist id="category-options">{suggestedCategories.map((category) => <option key={category} value={category} />)}</datalist></label>
-            <label>材质<input name="material" placeholder="如 PU+涤纶内里" /></label><label>规格/尺寸<input name="size" placeholder="选填" /></label>
-            <label>每箱数量<select name="packingQuantity" defaultValue="100">{packOptions.map((option) => <option key={option} value={option}>{option} 个</option>)}</select></label><label>单箱体积 m³<input name="cartonVolume" min="0" step="0.001" type="number" placeholder="如 0.200" /></label>
-            <label>现有库存<input name="stock" min="0" type="number" defaultValue="0" /></label>
-          </div><label>备注<textarea name="notes" placeholder="颜色、包装要求等" /></label><button className="save-product" disabled={loading}>{loading ? "正在保存…" : "保存图片"}</button></div>
+          <div className="form-fields batch-upload-fields">
+            <div className="form-grid batch-common-fields">
+              <label>厂家 *<input name="factory" required list="factory-options" placeholder="如 A厂、阿强厂" /><datalist id="factory-options">{factories.filter((factory) => factory !== "全部厂家" && factory !== "未标厂家").map((factory) => <option key={factory} value={factory} />)}</datalist></label>
+              <label>箱包分类<input name="category" list="category-options" defaultValue="女包" /><datalist id="category-options">{suggestedCategories.map((category) => <option key={category} value={category} />)}</datalist></label>
+              <label>每箱个数<select name="packingQuantity" defaultValue="100">{packOptions.map((option) => <option key={option} value={option}>{option} 个</option>)}</select></label>
+              <label>共同备注<input name="notes" placeholder="选填，会应用到本批照片" /></label>
+            </div>
+            {uploadItems.length > 0 && <div className="batch-upload-list">{uploadItems.map((item, index) => <div className="batch-upload-item" key={item.id}>
+              <img src={item.preview} alt={`第 ${index + 1} 张待上传照片`} />
+              <div><b>{index + 1}. {item.file.name}</b><label>货号<input inputMode="numeric" pattern="[0-9]+" value={item.sku} placeholder={item.recognizing ? "识别中…" : "填写数字"} disabled={item.recognizing} onChange={(event) => setUploadItems((current) => current.map((currentItem) => currentItem.id === item.id ? { ...currentItem, sku: event.target.value.replace(/\D/g, "") } : currentItem))} /></label><small>{item.recognizing ? "正在识别照片中的 # 货号" : item.sku ? `将保存为 ${item.sku}#` : "未识别到，请手动填写"}</small></div>
+              <button type="button" onClick={() => removeUploadItem(item.id)} aria-label={`移除${item.file.name}`}>×</button>
+            </div>)}</div>}
+            <button className="save-product" disabled={loading || uploadItems.some((item) => item.recognizing)}>{loading ? "正在批量保存…" : `保存 ${uploadItems.length || ""} 张照片`}</button>
+          </div>
         </form>
         <div className="manage-list"><h2>已保存图片 <small>（{products.length}）</small></h2>{products.length ? products.map((product) => editingId === product.id ?
           <form className="manage-editor" key={product.id} onSubmit={(event) => updateProduct(event, product)}>
@@ -504,6 +579,7 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
             <div className="editor-fields">
               <div className="form-grid">
                 <label>工厂货号 *<input name="sku" required inputMode="numeric" pattern="[0-9]+" maxLength={20} defaultValue={product.sku.replace(/#$/, "")} onInput={(event) => { event.currentTarget.value = event.currentTarget.value.replace(/\D/g, ""); }} /></label><label>中文名称 *<input name="name" required defaultValue={product.name} /></label>
+                <label>厂家 *<input name="factory" required list="factory-options" defaultValue={product.factory} /></label>
                 <label>客人货号/型号<input name="model" defaultValue={product.model} /></label><label>款式<input name="style" defaultValue={product.style} /></label>
                 <label>单价（选填）<input name="price" min="0" step="0.01" type="number" defaultValue={Number(product.price) || ""} /></label><label>箱包分类<input name="category" list="category-options" defaultValue={product.category || "女包"} /></label>
                 <label>材质<input name="material" defaultValue={product.material} /></label><label>规格/尺寸<input name="size" defaultValue={product.size} /></label>
@@ -516,7 +592,7 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
           </form> :
           <div className="manage-product-summary" key={product.id}>
             <button type="button" className="manage-thumb image-zoom" onClick={() => product.image_key && setLightbox(product)}>{product.image_key ? <img src={`/api/images/${product.image_key}`} alt={`放大查看${product.name}`} /> : "AB"}</button>
-            <div className="manage-name"><b>{product.name}</b><small>{product.sku} · {product.category}{Number(product.price) > 0 ? ` · ¥${Number(product.price).toFixed(2)}` : ""}</small></div>
+            <div className="manage-name"><b>{product.name}</b><small>{product.factory || "未标厂家"} · {product.sku} · {product.category}{Number(product.price) > 0 ? ` · ¥${Number(product.price).toFixed(2)}` : ""}</small></div>
             <button className="edit-row" onClick={() => setEditingId(product.id)}>编辑全部信息/更换照片</button><button className="delete-row" onClick={() => deleteProduct(product)}>删除商品</button>
           </div>) : <div className="manage-empty">还没有商品，请使用上方表单添加。</div>}</div>
       </section>}

@@ -1,0 +1,1 @@
+ALTER TABLE `products` ADD `factory` text DEFAULT '' NOT NULL;

@@ -20,9 +20,8 @@ test("ships a private photo library with optional prices and full-size downloads
   assert.match(catalog, /保存全部修改/);
   assert.match(catalog, /删除商品/);
   assert.match(catalog, /待上传商品预览/);
-  assert.match(catalog, /照片已选择，可直接点击保存/);
   assert.match(catalog, /单价（选填）/);
-  assert.match(catalog, /name="image" required/);
+  assert.match(catalog, /name="image" multiple/);
   assert.match(catalog, /className="lightbox"/);
   assert.match(catalog, /保存到电脑/);
   assert.match(catalog, /const maxUploadBytes = 1_500_000/);
@@ -37,6 +36,12 @@ test("ships a private photo library with optional prices and full-size downloads
   assert.match(api, /`\$\{digits\}#`/);
   assert.match(api, /这个货号已经存在，不能重复添加/);
   assert.match(catalog, /pattern="\[0-9\]\+"/);
+  assert.match(catalog, /按厂家批量上传/);
+  assert.match(catalog, /multiple accept=/);
+  assert.match(catalog, /createWorker\("eng"\)/);
+  assert.match(catalog, /compactText\.match\(\/\(\\d\+\)#\//);
+  assert.match(catalog, /name="factory" required/);
+  assert.match(api, /ALTER TABLE products ADD COLUMN factory/);
   assert.match(catalog, /row\.getCell\("H"\)\.value = hasPrice \? Number\(product\.price\) : null/);
   assert.match(catalog, /imageInputRef\.current\?\.click\(\)/);
   assert.match(catalog, /imageToExcelDataUrl/);
