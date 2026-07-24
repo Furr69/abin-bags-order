@@ -33,6 +33,10 @@ test("ships a private photo library with optional prices and full-size downloads
   assert.match(catalog, /className="inline-price"/);
   assert.match(catalog, /saveProductPrice/);
   assert.match(api, /export async function PATCH/);
+  assert.match(api, /function normalizeSku/);
+  assert.match(api, /`\$\{digits\}#`/);
+  assert.match(api, /这个货号已经存在，不能重复添加/);
+  assert.match(catalog, /pattern="\[0-9\]\+"/);
   assert.match(catalog, /row\.getCell\("H"\)\.value = hasPrice \? Number\(product\.price\) : null/);
   assert.match(catalog, /imageInputRef\.current\?\.click\(\)/);
   assert.match(catalog, /imageToExcelDataUrl/);

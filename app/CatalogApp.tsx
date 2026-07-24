@@ -471,7 +471,7 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
       </section>}
 
       {view === "admin" && <section className="admin-page">
-        <div className="section-heading"><div><span className="eyebrow">UPLOAD PHOTOS</span><h1>上传商品图片</h1><p>只选一张图片就能保存；名称会默认使用图片文件名，其余资料都可选填。</p></div><div className="admin-note">图片会长期保存在你的私人图片库中，之后可放大查看或保存到电脑。</div></div>
+        <div className="section-heading"><div><span className="eyebrow">UPLOAD PHOTOS</span><h1>上传商品图片</h1><p>选择图片后只需填写数字货号；系统会自动在末尾加 #，名称默认使用图片文件名。</p></div><div className="admin-note">图片会长期保存在你的私人图片库中，之后可放大查看或保存到电脑。</div></div>
         <form className="product-form" onSubmit={submitProduct}>
           <div className={`image-upload ${imagePreview ? "has-image" : ""}`}>
             <input ref={imageInputRef} className="image-file-input" id="product-image-input" type="file" name="image" required accept="image/jpeg,image/png,image/webp" onChange={(event) => {
@@ -486,7 +486,7 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
             </button>
           </div>
           <div className="form-fields"><div className="form-grid">
-            <label>工厂货号（选填）<input name="sku" placeholder="不填会自动生成" /></label><label>图片名称（选填）<input name="name" placeholder="默认使用图片文件名" /></label>
+            <label>工厂货号 *<input name="sku" required inputMode="numeric" pattern="[0-9]+" maxLength={20} placeholder="如 8057，自动保存为 8057#" onInput={(event) => { event.currentTarget.value = event.currentTarget.value.replace(/\D/g, ""); }} /></label><label>图片名称（选填）<input name="name" placeholder="默认使用图片文件名" /></label>
             <label>客人货号/型号<input name="model" placeholder="选填" /></label><label>款式<input name="style" placeholder="如 单肩包" /></label>
             <label>单价（选填）<input name="price" min="0" step="0.01" type="number" placeholder="可以不填" /></label><label>箱包分类<input name="category" list="category-options" defaultValue="女包" /><datalist id="category-options">{suggestedCategories.map((category) => <option key={category} value={category} />)}</datalist></label>
             <label>材质<input name="material" placeholder="如 PU+涤纶内里" /></label><label>规格/尺寸<input name="size" placeholder="选填" /></label>
@@ -503,7 +503,7 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
             </div>
             <div className="editor-fields">
               <div className="form-grid">
-                <label>工厂货号 *<input name="sku" required defaultValue={product.sku} /></label><label>中文名称 *<input name="name" required defaultValue={product.name} /></label>
+                <label>工厂货号 *<input name="sku" required inputMode="numeric" pattern="[0-9]+" maxLength={20} defaultValue={product.sku.replace(/#$/, "")} onInput={(event) => { event.currentTarget.value = event.currentTarget.value.replace(/\D/g, ""); }} /></label><label>中文名称 *<input name="name" required defaultValue={product.name} /></label>
                 <label>客人货号/型号<input name="model" defaultValue={product.model} /></label><label>款式<input name="style" defaultValue={product.style} /></label>
                 <label>单价（选填）<input name="price" min="0" step="0.01" type="number" defaultValue={Number(product.price) || ""} /></label><label>箱包分类<input name="category" list="category-options" defaultValue={product.category || "女包"} /></label>
                 <label>材质<input name="material" defaultValue={product.material} /></label><label>规格/尺寸<input name="size" defaultValue={product.size} /></label>

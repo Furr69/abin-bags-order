@@ -4,6 +4,11 @@ type ProductEnv = { DB: D1Database; PRODUCT_IMAGES: R2Bucket; ADMIN_EMAIL?: stri
 const runtime = () => env as unknown as ProductEnv;
 const packOptions = [50, 60, 70, 80, 90, 100];
 
+function normalizeSku(raw: string) {
+  const digits = raw.trim().replace(/#$/, "");
+  return /^\d+$/.test(digits) ? `${digits}#` : null;
+}
+
 function isAdmin(request: Request) {
   const adminEmail = String(runtime().ADMIN_EMAIL ?? "").toLowerCase();
   const userEmail = String(request.headers.get("oai-authenticated-user-email") ?? "").toLowerCase();
@@ -58,8 +63,9 @@ export async function POST(request: Request) {
       return Response.json({ error: "请选择一张商品图片" }, { status: 400 });
     }
     const imageLabel = image.name.replace(/\.[^.]+$/, "").trim();
-    const sku = value("sku") || `IMG-${Date.now().toString(36).toUpperCase()}`;
+    const sku = normalizeSku(value("sku"));
     const name = value("name") || imageLabel || "商品图片";
+    if (!sku) return Response.json({ error: "货号只能填写数字，系统会自动加 #" }, { status: 400 });
     const priceText = value("price");
     const price = priceText === "" ? 0 : Number(priceText);
     const packingQuantity = Number(value("packingQuantity"));
@@ -69,6 +75,8 @@ export async function POST(request: Request) {
     if (!packOptions.includes(packingQuantity)) {
       return Response.json({ error: "每箱数量只能选择 50、60、70、80、90 或 100" }, { status: 400 });
     }
+    const existing = await DB.prepare("SELECT id FROM products WHERE sku = ? OR sku = ?").bind(sku, sku.slice(0, -1)).first();
+    if (existing) return Response.json({ error: "这个货号已经存在，不能重复添加" }, { status: 409 });
 
     let imageKey: string | null = null;
     if (image instanceof File && image.size > 0) {
@@ -105,7 +113,7 @@ export async function PUT(request: Request) {
     const form = await request.formData();
     const value = (key: string) => String(form.get(key) ?? "").trim();
     const id = Number(value("id"));
-    const sku = value("sku");
+    const sku = normalizeSku(value("sku"));
     const name = value("name");
     const priceText = value("price");
     const price = priceText === "" ? 0 : Number(priceText);
@@ -113,12 +121,15 @@ export async function PUT(request: Request) {
     if (!Number.isInteger(id) || id < 1) {
       return Response.json({ error: "商品无效" }, { status: 400 });
     }
-    if (!sku || !name || !Number.isFinite(price) || price < 0) {
-      return Response.json({ error: "请填写货号和品名；价格可留空" }, { status: 400 });
+    if (!sku) return Response.json({ error: "货号只能填写数字，系统会自动加 #" }, { status: 400 });
+    if (!name || !Number.isFinite(price) || price < 0) {
+      return Response.json({ error: "请填写品名；价格可留空" }, { status: 400 });
     }
     if (!packOptions.includes(packingQuantity)) {
       return Response.json({ error: "每箱数量只能选择 50、60、70、80、90 或 100" }, { status: 400 });
     }
+    const duplicate = await DB.prepare("SELECT id FROM products WHERE (sku = ? OR sku = ?) AND id <> ?").bind(sku, sku.slice(0, -1), id).first();
+    if (duplicate) return Response.json({ error: "这个货号已经存在，不能重复保存" }, { status: 409 });
 
     const current = await DB.prepare("SELECT image_key FROM products WHERE id = ?").bind(id).first<{ image_key: string | null }>();
     if (!current) return Response.json({ error: "找不到这个商品" }, { status: 404 });
