@@ -21,7 +21,7 @@ type Product = {
 };
 
 type OrderLine = { cartons: number; unitsPerCarton: number };
-type UploadItem = { id: string; file: File; preview: string; sku: string; recognizing: boolean };
+type UploadItem = { id: string; file: File; preview: string; sku: string; recognizing: boolean; ocrNote: string };
 type SiteSettings = {
   brandName: string;
   brandSubtitle: string;
@@ -84,6 +84,64 @@ async function optimizeImageForUpload(file: File) {
   return new File([output], `${baseName}.jpg`, { type: "image/jpeg", lastModified: Date.now() });
 }
 
+async function makeHighContrastOcrImage(file: File) {
+  const bitmap = await createImageBitmap(file);
+  const longestSide = Math.max(bitmap.width, bitmap.height);
+  const scale = Math.min(2, 2400 / longestSide);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) {
+    bitmap.close();
+    throw new Error("照片预处理失败");
+  }
+  context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+
+  const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+  const histogram = new Uint32Array(256);
+  for (let offset = 0; offset < imageData.data.length; offset += 4) {
+    const grey = Math.round(imageData.data[offset] * 0.299 + imageData.data[offset + 1] * 0.587 + imageData.data[offset + 2] * 0.114);
+    histogram[grey]++;
+  }
+  const total = canvas.width * canvas.height;
+  let sum = 0;
+  for (let value = 0; value < 256; value++) sum += value * histogram[value];
+  let backgroundWeight = 0;
+  let backgroundSum = 0;
+  let bestVariance = -1;
+  let threshold = 165;
+  for (let value = 0; value < 256; value++) {
+    backgroundWeight += histogram[value];
+    if (!backgroundWeight) continue;
+    const foregroundWeight = total - backgroundWeight;
+    if (!foregroundWeight) break;
+    backgroundSum += value * histogram[value];
+    const backgroundMean = backgroundSum / backgroundWeight;
+    const foregroundMean = (sum - backgroundSum) / foregroundWeight;
+    const variance = backgroundWeight * foregroundWeight * (backgroundMean - foregroundMean) ** 2;
+    if (variance > bestVariance) {
+      bestVariance = variance;
+      threshold = value;
+    }
+  }
+  for (let offset = 0; offset < imageData.data.length; offset += 4) {
+    const grey = Math.round(imageData.data[offset] * 0.299 + imageData.data[offset + 1] * 0.587 + imageData.data[offset + 2] * 0.114);
+    const binary = grey > threshold ? 255 : 0;
+    imageData.data[offset] = binary;
+    imageData.data[offset + 1] = binary;
+    imageData.data[offset + 2] = binary;
+  }
+  context.putImageData(imageData, 0, 0);
+  return canvas;
+}
+
+function skuCandidate(text: string) {
+  const normalized = text.replace(/＃/g, "#").replace(/\s/g, "");
+  return normalized.match(/(\d{2,20})#/)?.[1] || "";
+}
+
 async function readApiResponse(response: Response) {
   const body = await response.text();
   if (response.status === 413) return { error: "图片仍然太大，请换一张图片重试" };
@@ -134,6 +192,7 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
   const [uploadItems, setUploadItems] = useState<UploadItem[]>([]);
   const [uploadProgress, setUploadProgress] = useState("");
   const [lightbox, setLightbox] = useState<Product | null>(null);
+  const [lightboxZoomed, setLightboxZoomed] = useState(false);
   const [priceDrafts, setPriceDrafts] = useState<Record<number, string>>({});
   const [savingPriceId, setSavingPriceId] = useState<number | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -310,6 +369,7 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
       preview: URL.createObjectURL(file),
       sku: "",
       recognizing: true,
+      ocrNote: "",
     }));
     setUploadItems(nextItems);
     setUploadProgress(files.length ? "正在识别照片中的 # 货号…" : "");
@@ -319,23 +379,38 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
       const { createWorker } = await import("tesseract.js");
       const worker = await createWorker("eng");
       try {
-        await worker.setParameters({ tessedit_char_whitelist: "0123456789#" });
+        await worker.setParameters({
+          tessedit_char_whitelist: "0123456789#",
+          tessedit_pageseg_mode: "11",
+          preserve_interword_spaces: "1",
+        });
         for (let index = 0; index < nextItems.length; index++) {
           const item = nextItems[index];
-          setUploadProgress(`正在识别第 ${index + 1}/${nextItems.length} 张照片…`);
-          const result = await worker.recognize(item.file);
-          const compactText = result.data.text.replace(/\s/g, "");
-          const match = compactText.match(/(\d+)#/);
+          setUploadProgress(`正在增强并核对第 ${index + 1}/${nextItems.length} 张照片…`);
+          const enhancedImage = await makeHighContrastOcrImage(item.file);
+          const enhancedResult = await worker.recognize(enhancedImage);
+          const originalResult = await worker.recognize(item.file);
+          const enhancedSku = skuCandidate(enhancedResult.data.text);
+          const originalSku = skuCandidate(originalResult.data.text);
+          const agreed = enhancedSku && enhancedSku === originalSku;
+          const confidentEnhanced = enhancedSku && enhancedResult.data.confidence >= 72;
+          const confidentOriginal = originalSku && originalResult.data.confidence >= 72;
+          const recognizedSku = agreed || confidentEnhanced ? enhancedSku : confidentOriginal ? originalSku : "";
           setUploadItems((current) => current.map((currentItem) => currentItem.id === item.id
-            ? { ...currentItem, sku: currentItem.sku || match?.[1] || "", recognizing: false }
+            ? {
+              ...currentItem,
+              sku: currentItem.sku || recognizedSku,
+              recognizing: false,
+              ocrNote: recognizedSku ? "已通过两次图片识别，请再看照片核对" : "识别结果不可靠，已留空，请看照片手动填写",
+            }
             : currentItem));
         }
       } finally {
         await worker.terminate();
       }
-      setUploadProgress("识别完成，请检查每张照片的货号");
+      setUploadProgress("识别完成；不确定的结果已留空，避免填错货号");
     } catch {
-      setUploadItems((current) => current.map((item) => ({ ...item, recognizing: false })));
+      setUploadItems((current) => current.map((item) => ({ ...item, recognizing: false, ocrNote: "未能可靠识别，请看照片手动填写" })));
       setUploadProgress("自动识别未完成，请手动填写未识别的货号");
     }
   };
@@ -346,6 +421,11 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
       if (removed) URL.revokeObjectURL(removed.preview);
       return current.filter((item) => item.id !== id);
     });
+  };
+
+  const openLightbox = (product: Product) => {
+    setLightboxZoomed(false);
+    setLightbox(product);
   };
 
   const submitProduct = async (event: FormEvent<HTMLFormElement>) => {
@@ -509,7 +589,7 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
           <div className="product-grid">{filtered.map((product, index) => {
             const order = orderFor(product);
             return <article className="product-card" key={product.id}>
-              <button type="button" className={`product-image image-zoom ${palettes[index % palettes.length]}`} onClick={() => product.image_key && setLightbox(product)} disabled={!product.image_key} aria-label={product.image_key ? `放大查看${product.name}` : `${product.name}暂无图片`}>
+              <button type="button" className={`product-image image-zoom ${palettes[index % palettes.length]}`} onClick={() => product.image_key && openLightbox(product)} disabled={!product.image_key} aria-label={product.image_key ? `放大查看${product.name}` : `${product.name}暂无图片`}>
                 {product.image_key ? <img src={`/api/images/${product.image_key}`} alt={product.name} /> : <><span className="bag-shape">◡</span><small>暂无商品图片</small></>}
                 <span className="sku">{product.sku}</span>
                 {product.image_key && <span className="zoom-hint">点击放大</span>}
@@ -563,7 +643,7 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
             </div>
             {uploadItems.length > 0 && <div className="batch-upload-list">{uploadItems.map((item, index) => <div className="batch-upload-item" key={item.id}>
               <img src={item.preview} alt={`第 ${index + 1} 张待上传照片`} />
-              <div><b>{index + 1}. {item.file.name}</b><label>货号<input inputMode="numeric" pattern="[0-9]+" value={item.sku} placeholder={item.recognizing ? "识别中…" : "填写数字"} disabled={item.recognizing} onChange={(event) => setUploadItems((current) => current.map((currentItem) => currentItem.id === item.id ? { ...currentItem, sku: event.target.value.replace(/\D/g, "") } : currentItem))} /></label><small>{item.recognizing ? "正在识别照片中的 # 货号" : item.sku ? `将保存为 ${item.sku}#` : "未识别到，请手动填写"}</small></div>
+              <div><b>{index + 1}. {item.file.name}</b><label>货号<input inputMode="numeric" pattern="[0-9]+" value={item.sku} placeholder={item.recognizing ? "识别中…" : "填写数字"} disabled={item.recognizing} onChange={(event) => setUploadItems((current) => current.map((currentItem) => currentItem.id === item.id ? { ...currentItem, sku: event.target.value.replace(/\D/g, ""), ocrNote: "已手动填写，请看照片核对" } : currentItem))} /></label><small>{item.recognizing ? "正在增强照片并进行两次识别" : item.ocrNote || (item.sku ? `将保存为 ${item.sku}#` : "未识别到，请手动填写")}</small></div>
               <button type="button" onClick={() => removeUploadItem(item.id)} aria-label={`移除${item.file.name}`}>×</button>
             </div>)}</div>}
             <button className="save-product" disabled={loading || uploadItems.some((item) => item.recognizing)}>{loading ? "正在批量保存…" : `保存 ${uploadItems.length || ""} 张照片`}</button>
@@ -572,9 +652,9 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
         <div className="manage-list"><h2>已保存图片 <small>（{products.length}）</small></h2>{products.length ? products.map((product) => editingId === product.id ?
           <form className="manage-editor" key={product.id} onSubmit={(event) => updateProduct(event, product)}>
             <div className="editor-image">
-              <button type="button" className="editor-thumb image-zoom" onClick={() => product.image_key && setLightbox(product)}>{product.image_key ? <img src={`/api/images/${product.image_key}`} alt={product.name} /> : "AB"}</button>
+              <button type="button" className="editor-thumb image-zoom" onClick={() => product.image_key && openLightbox(product)}>{product.image_key ? <img src={`/api/images/${product.image_key}`} alt={product.name} /> : "AB"}</button>
               <label className="replace-photo">更换商品照片<input type="file" name="image" accept="image/jpeg,image/png,image/webp" /></label>
-              <small>不选择新照片则保留原照片</small>
+              <small>点击上方照片可放大，再点一次可放到 2 倍核对货号；不选择新照片则保留原照片</small>
             </div>
             <div className="editor-fields">
               <div className="form-grid">
@@ -591,7 +671,7 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
             </div>
           </form> :
           <div className="manage-product-summary" key={product.id}>
-            <button type="button" className="manage-thumb image-zoom" onClick={() => product.image_key && setLightbox(product)}>{product.image_key ? <img src={`/api/images/${product.image_key}`} alt={`放大查看${product.name}`} /> : "AB"}</button>
+            <button type="button" className="manage-thumb image-zoom" onClick={() => product.image_key && openLightbox(product)}>{product.image_key ? <img src={`/api/images/${product.image_key}`} alt={`放大查看${product.name}`} /> : "AB"}</button>
             <div className="manage-name"><b>{product.name}</b><small>{product.factory || "未标厂家"} · {product.sku} · {product.category}{Number(product.price) > 0 ? ` · ¥${Number(product.price).toFixed(2)}` : ""}</small></div>
             <button className="edit-row" onClick={() => setEditingId(product.id)}>编辑全部信息/更换照片</button><button className="delete-row" onClick={() => deleteProduct(product)}>删除商品</button>
           </div>) : <div className="manage-empty">还没有商品，请使用上方表单添加。</div>}</div>
@@ -621,11 +701,13 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
       </section>}
 
       {selected.length > 0 && view === "catalog" && <button className="floating-order" onClick={() => setView("order")}><span><b>{selected.length}</b> 款 · {totalCartons} 箱 · {totalPieces} 个</span><strong>生成 Excel{hasPricedSelection ? `　¥${totalAmount.toFixed(2)}` : ""} →</strong></button>}
-      {lightbox?.image_key && <div className="lightbox" role="dialog" aria-modal="true" aria-label={`查看${lightbox.name}`} onClick={() => setLightbox(null)}>
+      {lightbox?.image_key && <div className="lightbox" role="dialog" aria-modal="true" aria-label={`查看${lightbox.name}`} onClick={() => { setLightbox(null); setLightboxZoomed(false); }}>
         <div className="lightbox-panel" onClick={(event) => event.stopPropagation()}>
-          <button type="button" className="lightbox-close" onClick={() => setLightbox(null)} aria-label="关闭大图">×</button>
-          <img src={`/api/images/${lightbox.image_key}`} alt={lightbox.name} />
-          <div className="lightbox-actions"><div><b>{lightbox.name}</b><small>{lightbox.sku}</small></div><a href={`/api/images/${lightbox.image_key}`} download={`${lightbox.sku || lightbox.name}.${lightbox.image_key.split(".").pop() || "jpg"}`}>保存到电脑 ↓</a></div>
+          <button type="button" className="lightbox-close" onClick={() => { setLightbox(null); setLightboxZoomed(false); }} aria-label="关闭大图">×</button>
+          <div className={`lightbox-image-wrap ${lightboxZoomed ? "is-zoomed" : ""}`} role="button" tabIndex={0} aria-label={lightboxZoomed ? "缩小照片" : "放大照片到两倍"} onClick={() => setLightboxZoomed((current) => !current)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") setLightboxZoomed((current) => !current); }}>
+            <img src={`/api/images/${lightbox.image_key}`} alt={lightbox.name} />
+          </div>
+          <div className="lightbox-actions"><div><b>{lightbox.name}</b><small>{lightbox.sku} · 点击照片可{lightboxZoomed ? "缩小" : "放大到 2 倍"}</small></div><div className="lightbox-buttons"><button type="button" onClick={() => setLightboxZoomed((current) => !current)}>{lightboxZoomed ? "恢复大小" : "放大 2 倍"}</button><a href={`/api/images/${lightbox.image_key}`} download={`${lightbox.sku || lightbox.name}.${lightbox.image_key.split(".").pop() || "jpg"}`}>保存到电脑 ↓</a></div></div>
         </div>
       </div>}
       {notice && <button className="toast" onClick={() => setNotice("")}>{notice}<span>×</span></button>}

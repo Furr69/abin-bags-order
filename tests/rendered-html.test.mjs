@@ -39,7 +39,11 @@ test("ships a private photo library with optional prices and full-size downloads
   assert.match(catalog, /按厂家批量上传/);
   assert.match(catalog, /multiple accept=/);
   assert.match(catalog, /createWorker\("eng"\)/);
-  assert.match(catalog, /compactText\.match\(\/\(\\d\+\)#\//);
+  assert.match(catalog, /makeHighContrastOcrImage/);
+  assert.match(catalog, /tessedit_pageseg_mode: "11"/);
+  assert.match(catalog, /data\.confidence >= 72/);
+  assert.match(catalog, /lightboxZoomed/);
+  assert.match(catalog, /放大 2 倍/);
   assert.match(catalog, /name="factory" required/);
   assert.match(api, /ALTER TABLE products ADD COLUMN factory/);
   assert.match(catalog, /row\.getCell\("H"\)\.value = hasPrice \? Number\(product\.price\) : null/);
