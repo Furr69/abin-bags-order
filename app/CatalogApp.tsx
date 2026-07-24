@@ -191,6 +191,7 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
   const [settingsDraft, setSettingsDraft] = useState<SiteSettings>(defaultSettings);
   const [uploadItems, setUploadItems] = useState<UploadItem[]>([]);
   const [uploadProgress, setUploadProgress] = useState("");
+  const [uploadPreview, setUploadPreview] = useState<{ src: string; label: string } | null>(null);
   const [lightbox, setLightbox] = useState<Product | null>(null);
   const [lightboxZoomed, setLightboxZoomed] = useState(false);
   const [priceDrafts, setPriceDrafts] = useState<Record<number, string>>({});
@@ -224,13 +225,19 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
 
   useEffect(() => { void loadProducts(); void loadSettings(); }, []);
   useEffect(() => {
-    if (!lightbox) return;
-    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setLightbox(null); };
+    if (!lightbox && !uploadPreview) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setLightbox(null);
+        setUploadPreview(null);
+        setLightboxZoomed(false);
+      }
+    };
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     window.addEventListener("keydown", closeOnEscape);
     return () => { document.body.style.overflow = previousOverflow; window.removeEventListener("keydown", closeOnEscape); };
-  }, [lightbox]);
+  }, [lightbox, uploadPreview]);
 
   const categories = useMemo(() => ["全部分类", ...Array.from(new Set(products.map((product) => product.category || "未分类")))], [products]);
   const factories = useMemo(() => ["全部厂家", ...Array.from(new Set(products.map((product) => product.factory || "未标厂家")))], [products]);
@@ -424,6 +431,7 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
   };
 
   const openLightbox = (product: Product) => {
+    setUploadPreview(null);
     setLightboxZoomed(false);
     setLightbox(product);
   };
@@ -642,9 +650,9 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
               <label>共同备注<input name="notes" placeholder="选填，会应用到本批照片" /></label>
             </div>
             {uploadItems.length > 0 && <div className="batch-upload-list">{uploadItems.map((item, index) => <div className="batch-upload-item" key={item.id}>
-              <a className="batch-preview-link" href={item.preview} target="_blank" rel="noreferrer" title="打开原图核对货号"><img src={item.preview} alt={`第 ${index + 1} 张待上传照片`} /></a>
+              <button type="button" className="batch-preview-link" title="在当前页面放大核对货号" onClick={() => { setLightbox(null); setUploadPreview({ src: item.preview, label: `第 ${index + 1} 张待上传照片` }); setLightboxZoomed(false); }}><img src={item.preview} alt={`第 ${index + 1} 张待上传照片`} /></button>
               <div><b>{index + 1}. {item.file.name}</b><label>货号<input inputMode="numeric" pattern="[0-9]+" value={item.sku} placeholder={item.recognizing ? "识别中…" : "填写数字"} disabled={item.recognizing} onChange={(event) => setUploadItems((current) => current.map((currentItem) => currentItem.id === item.id ? { ...currentItem, sku: event.target.value.replace(/\D/g, ""), ocrNote: "已手动填写，请看照片核对" } : currentItem))} /></label><small>{item.recognizing ? "正在增强照片并进行两次识别" : item.ocrNote || (item.sku ? `将保存为 ${item.sku}#` : "未识别到，请手动填写")}</small></div>
-              <button type="button" onClick={() => removeUploadItem(item.id)} aria-label={`移除${item.file.name}`}>×</button>
+              <button type="button" className="batch-remove" onClick={() => removeUploadItem(item.id)} aria-label={`移除${item.file.name}`}>×</button>
             </div>)}</div>}
             <button className="save-product" disabled={loading || uploadItems.some((item) => item.recognizing)}>{loading ? "正在批量保存…" : `保存 ${uploadItems.length || ""} 张照片`}</button>
           </div>
@@ -652,9 +660,9 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
         <div className="manage-list"><h2>已保存图片 <small>（{products.length}）</small></h2>{products.length ? products.map((product) => editingId === product.id ?
           <form className="manage-editor" key={product.id} onSubmit={(event) => updateProduct(event, product)}>
             <div className="editor-image">
-              {product.image_key ? <a className="editor-thumb image-zoom" href={`/api/images/${encodeURIComponent(product.image_key)}`} target="_blank" rel="noreferrer" title="在新页面打开原图"><img src={`/api/images/${encodeURIComponent(product.image_key)}`} alt={product.name} /><span className="zoom-hint">打开原图</span></a> : <div className="editor-thumb">暂无照片</div>}
+              {product.image_key ? <button type="button" className="editor-thumb image-zoom" onClick={() => openLightbox(product)} title="在当前页面放大"><img src={`/api/images/${encodeURIComponent(product.image_key)}`} alt={product.name} /><span className="zoom-hint">页面内放大</span></button> : <div className="editor-thumb">暂无照片</div>}
               <label className="replace-photo">更换商品照片<input type="file" name="image" accept="image/jpeg,image/png,image/webp" /></label>
-              <small>点击上方照片会在新页面打开原图，可直接放大核对货号；不选择新照片则保留原照片</small>
+              <small>点击上方照片会在当前页面放大核对货号；不选择新照片则保留原照片</small>
             </div>
             <div className="editor-fields">
               <div className="form-grid">
@@ -671,7 +679,7 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
             </div>
           </form> :
           <div className="manage-product-summary" key={product.id}>
-            {product.image_key ? <a className="manage-thumb image-zoom" href={`/api/images/${encodeURIComponent(product.image_key)}`} target="_blank" rel="noreferrer" title="在新页面打开原图"><img src={`/api/images/${encodeURIComponent(product.image_key)}`} alt={`打开原图查看${product.name}`} /></a> : <div className="manage-thumb">暂无照片</div>}
+            {product.image_key ? <button type="button" className="manage-thumb image-zoom" onClick={() => openLightbox(product)} title="在当前页面放大"><img src={`/api/images/${encodeURIComponent(product.image_key)}`} alt={`放大查看${product.name}`} /></button> : <div className="manage-thumb">暂无照片</div>}
             <div className="manage-name"><b>{product.name}</b><small>{product.factory || "未标厂家"} · {product.sku} · {product.category}{Number(product.price) > 0 ? ` · ¥${Number(product.price).toFixed(2)}` : ""}</small></div>
             <button className="edit-row" onClick={() => setEditingId(product.id)}>编辑全部信息/更换照片</button><button className="delete-row" onClick={() => deleteProduct(product)}>删除商品</button>
           </div>) : <div className="manage-empty">还没有商品，请使用上方表单添加。</div>}</div>
@@ -701,6 +709,15 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
       </section>}
 
       {selected.length > 0 && view === "catalog" && <button className="floating-order" onClick={() => setView("order")}><span><b>{selected.length}</b> 款 · {totalCartons} 箱 · {totalPieces} 个</span><strong>生成 Excel{hasPricedSelection ? `　¥${totalAmount.toFixed(2)}` : ""} →</strong></button>}
+      {uploadPreview && <div className="lightbox" role="dialog" aria-modal="true" aria-label={`查看${uploadPreview.label}`} onClick={() => { setUploadPreview(null); setLightboxZoomed(false); }}>
+        <div className="lightbox-panel" onClick={(event) => event.stopPropagation()}>
+          <button type="button" className="lightbox-close" onClick={() => { setUploadPreview(null); setLightboxZoomed(false); }} aria-label="关闭大图">×</button>
+          <div className={`lightbox-image-wrap ${lightboxZoomed ? "is-zoomed" : ""}`} role="button" tabIndex={0} aria-label={lightboxZoomed ? "缩小照片" : "放大照片到两倍"} onClick={() => setLightboxZoomed((current) => !current)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") setLightboxZoomed((current) => !current); }}>
+            <img src={uploadPreview.src} alt={uploadPreview.label} />
+          </div>
+          <div className="lightbox-actions"><div><b>{uploadPreview.label}</b><small>识别中的原图 · 点击照片可{lightboxZoomed ? "缩小" : "放大到 2 倍"}</small></div><div className="lightbox-buttons"><button type="button" onClick={() => setLightboxZoomed((current) => !current)}>{lightboxZoomed ? "恢复大小" : "放大 2 倍"}</button><button type="button" onClick={() => { setUploadPreview(null); setLightboxZoomed(false); }}>返回填写货号</button></div></div>
+        </div>
+      </div>}
       {lightbox?.image_key && <div className="lightbox" role="dialog" aria-modal="true" aria-label={`查看${lightbox.name}`} onClick={() => { setLightbox(null); setLightboxZoomed(false); }}>
         <div className="lightbox-panel" onClick={(event) => event.stopPropagation()}>
           <button type="button" className="lightbox-close" onClick={() => { setLightbox(null); setLightboxZoomed(false); }} aria-label="关闭大图">×</button>
