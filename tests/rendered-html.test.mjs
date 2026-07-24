@@ -45,7 +45,9 @@ test("ships a private photo library with optional prices and full-size downloads
   assert.match(catalog, /lightboxZoomed/);
   assert.match(catalog, /放大 2 倍/);
   assert.match(catalog, /setUploadPreview/);
-  assert.match(catalog, /返回填写货号/);
+  assert.match(catalog, /确认并看下一张/);
+  assert.match(catalog, /后台识别中，不用等待，可直接填写/);
+  assert.doesNotMatch(catalog, /disabled=\{item\.recognizing\}/);
   assert.doesNotMatch(catalog, /target="_blank"/);
   assert.match(catalog, /encodeURIComponent\(product\.image_key\)/);
   assert.match(catalog, /className="batch-preview-link"/);

@@ -191,7 +191,7 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
   const [settingsDraft, setSettingsDraft] = useState<SiteSettings>(defaultSettings);
   const [uploadItems, setUploadItems] = useState<UploadItem[]>([]);
   const [uploadProgress, setUploadProgress] = useState("");
-  const [uploadPreview, setUploadPreview] = useState<{ src: string; label: string } | null>(null);
+  const [uploadPreview, setUploadPreview] = useState<{ id: string; src: string; label: string } | null>(null);
   const [lightbox, setLightbox] = useState<Product | null>(null);
   const [lightboxZoomed, setLightboxZoomed] = useState(false);
   const [priceDrafts, setPriceDrafts] = useState<Record<number, string>>({});
@@ -396,19 +396,24 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
           setUploadProgress(`正在增强并核对第 ${index + 1}/${nextItems.length} 张照片…`);
           const enhancedImage = await makeHighContrastOcrImage(item.file);
           const enhancedResult = await worker.recognize(enhancedImage);
-          const originalResult = await worker.recognize(item.file);
           const enhancedSku = skuCandidate(enhancedResult.data.text);
-          const originalSku = skuCandidate(originalResult.data.text);
+          const confidentEnhanced = Boolean(enhancedSku && enhancedResult.data.confidence >= 72);
+          let originalSku = "";
+          let originalConfidence = 0;
+          if (!confidentEnhanced) {
+            const originalResult = await worker.recognize(item.file);
+            originalSku = skuCandidate(originalResult.data.text);
+            originalConfidence = originalResult.data.confidence;
+          }
           const agreed = enhancedSku && enhancedSku === originalSku;
-          const confidentEnhanced = enhancedSku && enhancedResult.data.confidence >= 72;
-          const confidentOriginal = originalSku && originalResult.data.confidence >= 72;
+          const confidentOriginal = originalSku && originalConfidence >= 72;
           const recognizedSku = agreed || confidentEnhanced ? enhancedSku : confidentOriginal ? originalSku : "";
           setUploadItems((current) => current.map((currentItem) => currentItem.id === item.id
             ? {
               ...currentItem,
               sku: currentItem.sku || recognizedSku,
               recognizing: false,
-              ocrNote: recognizedSku ? "已通过两次图片识别，请再看照片核对" : "识别结果不可靠，已留空，请看照片手动填写",
+              ocrNote: recognizedSku ? "已自动识别，请看照片核对" : "识别结果不可靠，已留空，可直接手动填写",
             }
             : currentItem));
         }
@@ -423,11 +428,41 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
   };
 
   const removeUploadItem = (id: string) => {
+    if (uploadPreview?.id === id) setUploadPreview(null);
     setUploadItems((current) => {
       const removed = current.find((item) => item.id === id);
       if (removed) URL.revokeObjectURL(removed.preview);
       return current.filter((item) => item.id !== id);
     });
+  };
+
+  const updateUploadSku = (id: string, value: string) => {
+    const digits = value.replace(/\D/g, "");
+    setUploadItems((current) => current.map((item) => item.id === id
+      ? { ...item, sku: digits, ocrNote: digits ? "已填写，按回车看下一张" : "请填写数字货号" }
+      : item));
+  };
+
+  const advanceUploadPreview = () => {
+    if (!uploadPreview) return;
+    const currentIndex = uploadItems.findIndex((item) => item.id === uploadPreview.id);
+    const currentItem = uploadItems[currentIndex];
+    if (!currentItem?.sku.trim()) {
+      setNotice("请先填写这张照片的数字货号");
+      return;
+    }
+    const nextIndex = uploadItems.findIndex((item, index) => index > currentIndex && !item.sku.trim());
+    const fallbackIndex = uploadItems.findIndex((item, index) => index !== currentIndex && !item.sku.trim());
+    const targetIndex = nextIndex >= 0 ? nextIndex : fallbackIndex;
+    if (targetIndex < 0) {
+      setUploadPreview(null);
+      setLightboxZoomed(false);
+      setNotice("这批照片的货号已全部填写，可以直接保存");
+      return;
+    }
+    const target = uploadItems[targetIndex];
+    setLightboxZoomed(false);
+    setUploadPreview({ id: target.id, src: target.preview, label: `第 ${targetIndex + 1} 张待上传照片` });
   };
 
   const openLightbox = (product: Product) => {
@@ -440,7 +475,6 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
     event.preventDefault();
     const formElement = event.currentTarget;
     if (!uploadItems.length) return setNotice("请先选择商品照片");
-    if (uploadItems.some((item) => item.recognizing)) return setNotice("请稍等，正在识别照片货号");
     if (uploadItems.some((item) => !item.sku.trim())) return setNotice("请填写所有未识别到的货号");
     setLoading(true);
     setNotice("");
@@ -467,6 +501,8 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
       if (!failures.length) {
         uploadItems.forEach((item) => URL.revokeObjectURL(item.preview));
         setUploadItems([]);
+        setUploadPreview(null);
+        setLightboxZoomed(false);
         formElement.reset();
         setUploadProgress("");
         setNotice(`${saved} 张照片已保存到图片库`);
@@ -567,6 +603,7 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
     "--accent-dark": settings.accentDark,
     "--grid-columns": String(settings.columns),
   } as CSSProperties;
+  const previewUploadItem = uploadPreview ? uploadItems.find((item) => item.id === uploadPreview.id) ?? null : null;
 
   return (
     <main className="catalog-app" style={themeStyle}>
@@ -650,11 +687,11 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
               <label>共同备注<input name="notes" placeholder="选填，会应用到本批照片" /></label>
             </div>
             {uploadItems.length > 0 && <div className="batch-upload-list">{uploadItems.map((item, index) => <div className="batch-upload-item" key={item.id}>
-              <button type="button" className="batch-preview-link" title="在当前页面放大核对货号" onClick={() => { setLightbox(null); setUploadPreview({ src: item.preview, label: `第 ${index + 1} 张待上传照片` }); setLightboxZoomed(false); }}><img src={item.preview} alt={`第 ${index + 1} 张待上传照片`} /></button>
-              <div><b>{index + 1}. {item.file.name}</b><label>货号<input inputMode="numeric" pattern="[0-9]+" value={item.sku} placeholder={item.recognizing ? "识别中…" : "填写数字"} disabled={item.recognizing} onChange={(event) => setUploadItems((current) => current.map((currentItem) => currentItem.id === item.id ? { ...currentItem, sku: event.target.value.replace(/\D/g, ""), ocrNote: "已手动填写，请看照片核对" } : currentItem))} /></label><small>{item.recognizing ? "正在增强照片并进行两次识别" : item.ocrNote || (item.sku ? `将保存为 ${item.sku}#` : "未识别到，请手动填写")}</small></div>
+              <button type="button" className="batch-preview-link" title="在当前页面放大核对货号" onClick={() => { setLightbox(null); setUploadPreview({ id: item.id, src: item.preview, label: `第 ${index + 1} 张待上传照片` }); setLightboxZoomed(false); }}><img src={item.preview} alt={`第 ${index + 1} 张待上传照片`} /></button>
+              <div><b>{index + 1}. {item.file.name}</b><label>货号<input inputMode="numeric" pattern="[0-9]+" value={item.sku} placeholder={item.recognizing ? "识别中，也可直接填写" : "填写数字"} onChange={(event) => updateUploadSku(item.id, event.target.value)} /></label><small>{item.recognizing && !item.sku ? "后台识别中，不用等待，可直接填写" : item.ocrNote || (item.sku ? `将保存为 ${item.sku}#` : "未识别到，请手动填写")}</small></div>
               <button type="button" className="batch-remove" onClick={() => removeUploadItem(item.id)} aria-label={`移除${item.file.name}`}>×</button>
             </div>)}</div>}
-            <button className="save-product" disabled={loading || uploadItems.some((item) => item.recognizing)}>{loading ? "正在批量保存…" : `保存 ${uploadItems.length || ""} 张照片`}</button>
+            <button className="save-product" disabled={loading}>{loading ? "正在批量保存…" : `保存 ${uploadItems.length || ""} 张照片`}</button>
           </div>
         </form>
         <div className="manage-list"><h2>已保存图片 <small>（{products.length}）</small></h2>{products.length ? products.map((product) => editingId === product.id ?
@@ -709,13 +746,16 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
       </section>}
 
       {selected.length > 0 && view === "catalog" && <button className="floating-order" onClick={() => setView("order")}><span><b>{selected.length}</b> 款 · {totalCartons} 箱 · {totalPieces} 个</span><strong>生成 Excel{hasPricedSelection ? `　¥${totalAmount.toFixed(2)}` : ""} →</strong></button>}
-      {uploadPreview && <div className="lightbox" role="dialog" aria-modal="true" aria-label={`查看${uploadPreview.label}`} onClick={() => { setUploadPreview(null); setLightboxZoomed(false); }}>
+      {uploadPreview && previewUploadItem && <div className="lightbox" role="dialog" aria-modal="true" aria-label={`查看${uploadPreview.label}`} onClick={() => { setUploadPreview(null); setLightboxZoomed(false); }}>
         <div className="lightbox-panel" onClick={(event) => event.stopPropagation()}>
           <button type="button" className="lightbox-close" onClick={() => { setUploadPreview(null); setLightboxZoomed(false); }} aria-label="关闭大图">×</button>
           <div className={`lightbox-image-wrap ${lightboxZoomed ? "is-zoomed" : ""}`} role="button" tabIndex={0} aria-label={lightboxZoomed ? "缩小照片" : "放大照片到两倍"} onClick={() => setLightboxZoomed((current) => !current)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") setLightboxZoomed((current) => !current); }}>
             <img src={uploadPreview.src} alt={uploadPreview.label} />
           </div>
-          <div className="lightbox-actions"><div><b>{uploadPreview.label}</b><small>识别中的原图 · 点击照片可{lightboxZoomed ? "缩小" : "放大到 2 倍"}</small></div><div className="lightbox-buttons"><button type="button" onClick={() => setLightboxZoomed((current) => !current)}>{lightboxZoomed ? "恢复大小" : "放大 2 倍"}</button><button type="button" onClick={() => { setUploadPreview(null); setLightboxZoomed(false); }}>返回填写货号</button></div></div>
+          <div className="lightbox-actions quick-entry-actions">
+            <div className="quick-sku-entry"><b>{uploadPreview.label}</b><label>货号<div><input autoFocus inputMode="numeric" pattern="[0-9]+" value={previewUploadItem.sku} placeholder="只填数字" onChange={(event) => updateUploadSku(previewUploadItem.id, event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); advanceUploadPreview(); } }} /><span>#</span></div></label><small>{previewUploadItem.recognizing ? "后台仍在识别；直接输入后按回车看下一张" : "输入数字后按回车，自动看下一张"}</small></div>
+            <div className="lightbox-buttons"><button type="button" onClick={() => setLightboxZoomed((current) => !current)}>{lightboxZoomed ? "恢复大小" : "放大 2 倍"}</button><button type="button" onClick={advanceUploadPreview}>确认并看下一张 →</button><button type="button" onClick={() => { setUploadPreview(null); setLightboxZoomed(false); }}>返回列表</button></div>
+          </div>
         </div>
       </div>}
       {lightbox?.image_key && <div className="lightbox" role="dialog" aria-modal="true" aria-label={`查看${lightbox.name}`} onClick={() => { setLightbox(null); setLightboxZoomed(false); }}>
