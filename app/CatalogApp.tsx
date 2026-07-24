@@ -642,7 +642,7 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
               <label>共同备注<input name="notes" placeholder="选填，会应用到本批照片" /></label>
             </div>
             {uploadItems.length > 0 && <div className="batch-upload-list">{uploadItems.map((item, index) => <div className="batch-upload-item" key={item.id}>
-              <img src={item.preview} alt={`第 ${index + 1} 张待上传照片`} />
+              <a className="batch-preview-link" href={item.preview} target="_blank" rel="noreferrer" title="打开原图核对货号"><img src={item.preview} alt={`第 ${index + 1} 张待上传照片`} /></a>
               <div><b>{index + 1}. {item.file.name}</b><label>货号<input inputMode="numeric" pattern="[0-9]+" value={item.sku} placeholder={item.recognizing ? "识别中…" : "填写数字"} disabled={item.recognizing} onChange={(event) => setUploadItems((current) => current.map((currentItem) => currentItem.id === item.id ? { ...currentItem, sku: event.target.value.replace(/\D/g, ""), ocrNote: "已手动填写，请看照片核对" } : currentItem))} /></label><small>{item.recognizing ? "正在增强照片并进行两次识别" : item.ocrNote || (item.sku ? `将保存为 ${item.sku}#` : "未识别到，请手动填写")}</small></div>
               <button type="button" onClick={() => removeUploadItem(item.id)} aria-label={`移除${item.file.name}`}>×</button>
             </div>)}</div>}
@@ -652,9 +652,9 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
         <div className="manage-list"><h2>已保存图片 <small>（{products.length}）</small></h2>{products.length ? products.map((product) => editingId === product.id ?
           <form className="manage-editor" key={product.id} onSubmit={(event) => updateProduct(event, product)}>
             <div className="editor-image">
-              <button type="button" className="editor-thumb image-zoom" onClick={() => product.image_key && openLightbox(product)}>{product.image_key ? <img src={`/api/images/${product.image_key}`} alt={product.name} /> : "AB"}</button>
+              {product.image_key ? <a className="editor-thumb image-zoom" href={`/api/images/${encodeURIComponent(product.image_key)}`} target="_blank" rel="noreferrer" title="在新页面打开原图"><img src={`/api/images/${encodeURIComponent(product.image_key)}`} alt={product.name} /><span className="zoom-hint">打开原图</span></a> : <div className="editor-thumb">暂无照片</div>}
               <label className="replace-photo">更换商品照片<input type="file" name="image" accept="image/jpeg,image/png,image/webp" /></label>
-              <small>点击上方照片可放大，再点一次可放到 2 倍核对货号；不选择新照片则保留原照片</small>
+              <small>点击上方照片会在新页面打开原图，可直接放大核对货号；不选择新照片则保留原照片</small>
             </div>
             <div className="editor-fields">
               <div className="form-grid">
@@ -671,7 +671,7 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
             </div>
           </form> :
           <div className="manage-product-summary" key={product.id}>
-            <button type="button" className="manage-thumb image-zoom" onClick={() => product.image_key && openLightbox(product)}>{product.image_key ? <img src={`/api/images/${product.image_key}`} alt={`放大查看${product.name}`} /> : "AB"}</button>
+            {product.image_key ? <a className="manage-thumb image-zoom" href={`/api/images/${encodeURIComponent(product.image_key)}`} target="_blank" rel="noreferrer" title="在新页面打开原图"><img src={`/api/images/${encodeURIComponent(product.image_key)}`} alt={`打开原图查看${product.name}`} /></a> : <div className="manage-thumb">暂无照片</div>}
             <div className="manage-name"><b>{product.name}</b><small>{product.factory || "未标厂家"} · {product.sku} · {product.category}{Number(product.price) > 0 ? ` · ¥${Number(product.price).toFixed(2)}` : ""}</small></div>
             <button className="edit-row" onClick={() => setEditingId(product.id)}>编辑全部信息/更换照片</button><button className="delete-row" onClick={() => deleteProduct(product)}>删除商品</button>
           </div>) : <div className="manage-empty">还没有商品，请使用上方表单添加。</div>}</div>

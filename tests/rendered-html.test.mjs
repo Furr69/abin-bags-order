@@ -44,6 +44,9 @@ test("ships a private photo library with optional prices and full-size downloads
   assert.match(catalog, /data\.confidence >= 72/);
   assert.match(catalog, /lightboxZoomed/);
   assert.match(catalog, /放大 2 倍/);
+  assert.match(catalog, /在新页面打开原图/);
+  assert.match(catalog, /encodeURIComponent\(product\.image_key\)/);
+  assert.match(catalog, /className="batch-preview-link"/);
   assert.match(catalog, /name="factory" required/);
   assert.match(api, /ALTER TABLE products ADD COLUMN factory/);
   assert.match(catalog, /row\.getCell\("H"\)\.value = hasPrice \? Number\(product\.price\) : null/);
