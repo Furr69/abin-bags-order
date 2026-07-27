@@ -475,10 +475,19 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
     event.preventDefault();
     const formElement = event.currentTarget;
     if (!uploadItems.length) return setNotice("请先选择商品照片");
-    if (uploadItems.some((item) => !item.sku.trim())) return setNotice("请填写所有未识别到的货号");
+    const baseForm = new FormData(formElement);
+    const factory = String(baseForm.get("factory") ?? "").trim();
+    if (!factory) return setNotice("请先填写厂家，再保存这批照片");
+    const missingSkuIndex = uploadItems.findIndex((item) => !item.sku.trim());
+    if (missingSkuIndex >= 0) {
+      const missingItem = uploadItems[missingSkuIndex];
+      setUploadPreview({ id: missingItem.id, src: missingItem.preview, label: `第 ${missingSkuIndex + 1} 张待上传照片` });
+      setLightboxZoomed(false);
+      setNotice(`还有 ${uploadItems.filter((item) => !item.sku.trim()).length} 张照片未填写货号`);
+      return;
+    }
     setLoading(true);
     setNotice("");
-    const baseForm = new FormData(formElement);
     const failures: string[] = [];
     let saved = 0;
     try {
@@ -672,7 +681,7 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
 
       {view === "admin" && <section className="admin-page">
         <div className="section-heading"><div><span className="eyebrow">BATCH UPLOAD</span><h1>按厂家批量上传</h1><p>选择厂家后一次上传多张照片，系统只自动识别照片画面中带 # 的数字货号。</p></div><div className="admin-note">手动货号可填写数字、字母或其他字符，系统统一在末尾加 #；同一厂家内不能重复。</div></div>
-        <form className="product-form batch-product-form" onSubmit={submitProduct}>
+        <form className="product-form batch-product-form" noValidate onSubmit={submitProduct}>
           <div className={`image-upload ${uploadItems.length ? "has-image" : ""}`}>
             <input ref={imageInputRef} className="image-file-input" id="product-image-input" type="file" name="image" multiple accept="image/jpeg,image/png,image/webp" onChange={(event) => void chooseUploadFiles(Array.from(event.target.files ?? []))} />
             <button className="image-picker-trigger" type="button" onClick={() => imageInputRef.current?.click()}>
@@ -681,7 +690,7 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
           </div>
           <div className="form-fields batch-upload-fields">
             <div className="form-grid batch-common-fields">
-              <label>厂家 *<input name="factory" required list="factory-options" placeholder="如 A厂、阿强厂" /><datalist id="factory-options">{factories.filter((factory) => factory !== "全部厂家" && factory !== "未标厂家").map((factory) => <option key={factory} value={factory} />)}</datalist></label>
+              <label>厂家 *<input name="factory" list="factory-options" placeholder="必须填写，如 A厂、阿强厂" /><datalist id="factory-options">{factories.filter((factory) => factory !== "全部厂家" && factory !== "未标厂家").map((factory) => <option key={factory} value={factory} />)}</datalist></label>
               <label>箱包分类<input name="category" list="category-options" defaultValue="女包" /><datalist id="category-options">{suggestedCategories.map((category) => <option key={category} value={category} />)}</datalist></label>
               <label>每箱个数<select name="packingQuantity" defaultValue="100">{packOptions.map((option) => <option key={option} value={option}>{option} 个</option>)}</select></label>
               <label>共同备注<input name="notes" placeholder="选填，会应用到本批照片" /></label>

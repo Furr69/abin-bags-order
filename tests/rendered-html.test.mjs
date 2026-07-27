@@ -40,6 +40,9 @@ test("ships a private photo library with optional prices and full-size downloads
   assert.doesNotMatch(catalog, /pattern="\[0-9\]\+"/);
   assert.match(catalog, /可填写数字、字母或其他字符/);
   assert.match(catalog, /按厂家批量上传/);
+  assert.match(catalog, /batch-product-form" noValidate/);
+  assert.match(catalog, /还有 \$\{uploadItems\.filter/);
+  assert.match(catalog, /请先填写厂家，再保存这批照片/);
   assert.match(catalog, /multiple accept=/);
   assert.match(catalog, /createWorker\("eng"\)/);
   assert.match(catalog, /makeHighContrastOcrImage/);
