@@ -33,9 +33,12 @@ test("ships a private photo library with optional prices and full-size downloads
   assert.match(catalog, /saveProductPrice/);
   assert.match(api, /export async function PATCH/);
   assert.match(api, /function normalizeSku/);
-  assert.match(api, /`\$\{digits\}#`/);
-  assert.match(api, /这个货号已经存在，不能重复添加/);
-  assert.match(catalog, /pattern="\[0-9\]\+"/);
+  assert.match(api, /`\$\{value\}#`/);
+  assert.match(api, /这个厂家已经有相同货号，不能重复添加/);
+  assert.match(api, /WHERE factory = \? AND \(sku = \? OR sku = \?\)/);
+  assert.match(api, /products_factory_sku_unique/);
+  assert.doesNotMatch(catalog, /pattern="\[0-9\]\+"/);
+  assert.match(catalog, /可填写数字、字母或其他字符/);
   assert.match(catalog, /按厂家批量上传/);
   assert.match(catalog, /multiple accept=/);
   assert.match(catalog, /createWorker\("eng"\)/);

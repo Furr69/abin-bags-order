@@ -1,9 +1,9 @@
 import { sql } from "drizzle-orm";
-import { integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const products = sqliteTable("products", {
   id: integer("id").primaryKey({ autoIncrement: true }),
-  sku: text("sku").notNull().unique(),
+  sku: text("sku").notNull(),
   name: text("name").notNull(),
   model: text("model").notNull().default(""),
   style: text("style").notNull().default(""),
@@ -18,7 +18,9 @@ export const products = sqliteTable("products", {
   notes: text("notes").notNull().default(""),
   imageKey: text("image_key"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-});
+}, (table) => [
+  uniqueIndex("products_factory_sku_unique").on(table.factory, table.sku),
+]);
 
 export const siteSettings = sqliteTable("site_settings", {
   id: integer("id").primaryKey(),

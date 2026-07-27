@@ -5,8 +5,8 @@ const runtime = () => env as unknown as ProductEnv;
 const packOptions = [50, 60, 70, 80, 90, 100];
 
 function normalizeSku(raw: string) {
-  const digits = raw.trim().replace(/#$/, "");
-  return /^\d+$/.test(digits) ? `${digits}#` : null;
+  const value = raw.trim().replace(/#+$/, "").trim();
+  return value && value.length <= 40 ? `${value}#` : null;
 }
 
 function isAdmin(request: Request) {
@@ -18,7 +18,7 @@ function isAdmin(request: Request) {
 async function ensureProductsTable(db: D1Database) {
   await db.prepare(`CREATE TABLE IF NOT EXISTS products (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    sku TEXT NOT NULL UNIQUE,
+    sku TEXT NOT NULL,
     name TEXT NOT NULL,
     model TEXT NOT NULL DEFAULT '',
     style TEXT NOT NULL DEFAULT '',
@@ -41,6 +41,8 @@ async function ensureProductsTable(db: D1Database) {
   if (!columns.results.some((column) => column.name === "factory")) {
     await db.prepare("ALTER TABLE products ADD COLUMN factory TEXT NOT NULL DEFAULT ''").run();
   }
+  await db.prepare("DROP INDEX IF EXISTS products_sku_unique").run();
+  await db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS products_factory_sku_unique ON products (factory, sku)").run();
 }
 
 export async function GET(request: Request) {
@@ -70,7 +72,7 @@ export async function POST(request: Request) {
     const name = value("name") || sku || "商品图片";
     const factory = value("factory");
     if (!factory) return Response.json({ error: "请填写厂家" }, { status: 400 });
-    if (!sku) return Response.json({ error: "货号只能填写数字，系统会自动加 #" }, { status: 400 });
+    if (!sku) return Response.json({ error: "请填写 40 个字符以内的货号，系统会自动加 #" }, { status: 400 });
     const priceText = value("price");
     const price = priceText === "" ? 0 : Number(priceText);
     const packingQuantity = Number(value("packingQuantity"));
@@ -80,8 +82,8 @@ export async function POST(request: Request) {
     if (!packOptions.includes(packingQuantity)) {
       return Response.json({ error: "每箱数量只能选择 50、60、70、80、90 或 100" }, { status: 400 });
     }
-    const existing = await DB.prepare("SELECT id FROM products WHERE sku = ? OR sku = ?").bind(sku, sku.slice(0, -1)).first();
-    if (existing) return Response.json({ error: "这个货号已经存在，不能重复添加" }, { status: 409 });
+    const existing = await DB.prepare("SELECT id FROM products WHERE factory = ? AND (sku = ? OR sku = ?)").bind(factory, sku, sku.slice(0, -1)).first();
+    if (existing) return Response.json({ error: "这个厂家已经有相同货号，不能重复添加" }, { status: 409 });
 
     let imageKey: string | null = null;
     if (image instanceof File && image.size > 0) {
@@ -105,7 +107,7 @@ export async function POST(request: Request) {
     return Response.json({ id: result.meta.last_row_id }, { status: 201 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "商品保存失败";
-    return Response.json({ error: message.includes("UNIQUE") ? "这个货号已经存在" : message }, { status: 500 });
+    return Response.json({ error: message.includes("UNIQUE") ? "这个厂家已经有相同货号" : message }, { status: 500 });
   }
 }
 
@@ -127,7 +129,7 @@ export async function PUT(request: Request) {
     if (!Number.isInteger(id) || id < 1) {
       return Response.json({ error: "商品无效" }, { status: 400 });
     }
-    if (!sku) return Response.json({ error: "货号只能填写数字，系统会自动加 #" }, { status: 400 });
+    if (!sku) return Response.json({ error: "请填写 40 个字符以内的货号，系统会自动加 #" }, { status: 400 });
     if (!factory) return Response.json({ error: "请填写厂家" }, { status: 400 });
     if (!name || !Number.isFinite(price) || price < 0) {
       return Response.json({ error: "请填写品名；价格可留空" }, { status: 400 });
@@ -135,8 +137,8 @@ export async function PUT(request: Request) {
     if (!packOptions.includes(packingQuantity)) {
       return Response.json({ error: "每箱数量只能选择 50、60、70、80、90 或 100" }, { status: 400 });
     }
-    const duplicate = await DB.prepare("SELECT id FROM products WHERE (sku = ? OR sku = ?) AND id <> ?").bind(sku, sku.slice(0, -1), id).first();
-    if (duplicate) return Response.json({ error: "这个货号已经存在，不能重复保存" }, { status: 409 });
+    const duplicate = await DB.prepare("SELECT id FROM products WHERE factory = ? AND (sku = ? OR sku = ?) AND id <> ?").bind(factory, sku, sku.slice(0, -1), id).first();
+    if (duplicate) return Response.json({ error: "这个厂家已经有相同货号，不能重复保存" }, { status: 409 });
 
     const current = await DB.prepare("SELECT image_key FROM products WHERE id = ?").bind(id).first<{ image_key: string | null }>();
     if (!current) return Response.json({ error: "找不到这个商品" }, { status: 404 });
@@ -167,7 +169,7 @@ export async function PUT(request: Request) {
   } catch (error) {
     if (uploadedImageKey) await PRODUCT_IMAGES.delete(uploadedImageKey).catch(() => undefined);
     const message = error instanceof Error ? error.message : "修改失败";
-    return Response.json({ error: message.includes("UNIQUE") ? "这个货号已经存在" : message }, { status: 500 });
+    return Response.json({ error: message.includes("UNIQUE") ? "这个厂家已经有相同货号" : message }, { status: 500 });
   }
 }
 

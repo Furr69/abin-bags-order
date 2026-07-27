@@ -437,9 +437,9 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
   };
 
   const updateUploadSku = (id: string, value: string) => {
-    const digits = value.replace(/\D/g, "");
+    const normalized = value.replace(/#/g, "").slice(0, 40);
     setUploadItems((current) => current.map((item) => item.id === id
-      ? { ...item, sku: digits, ocrNote: digits ? "已填写，按回车看下一张" : "请填写数字货号" }
+      ? { ...item, sku: normalized, ocrNote: normalized ? "已填写，按回车看下一张" : "请填写货号" }
       : item));
   };
 
@@ -448,7 +448,7 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
     const currentIndex = uploadItems.findIndex((item) => item.id === uploadPreview.id);
     const currentItem = uploadItems[currentIndex];
     if (!currentItem?.sku.trim()) {
-      setNotice("请先填写这张照片的数字货号");
+      setNotice("请先填写这张照片的货号");
       return;
     }
     const nextIndex = uploadItems.findIndex((item, index) => index > currentIndex && !item.sku.trim());
@@ -671,7 +671,7 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
       </section>}
 
       {view === "admin" && <section className="admin-page">
-        <div className="section-heading"><div><span className="eyebrow">BATCH UPLOAD</span><h1>按厂家批量上传</h1><p>选择厂家后一次上传多张照片，系统只识别照片画面中带 # 的数字货号。</p></div><div className="admin-note">识别结果会显示在每张预览旁；保存前请检查，未识别的货号可手动填写。</div></div>
+        <div className="section-heading"><div><span className="eyebrow">BATCH UPLOAD</span><h1>按厂家批量上传</h1><p>选择厂家后一次上传多张照片，系统只自动识别照片画面中带 # 的数字货号。</p></div><div className="admin-note">手动货号可填写数字、字母或其他字符，系统统一在末尾加 #；同一厂家内不能重复。</div></div>
         <form className="product-form batch-product-form" onSubmit={submitProduct}>
           <div className={`image-upload ${uploadItems.length ? "has-image" : ""}`}>
             <input ref={imageInputRef} className="image-file-input" id="product-image-input" type="file" name="image" multiple accept="image/jpeg,image/png,image/webp" onChange={(event) => void chooseUploadFiles(Array.from(event.target.files ?? []))} />
@@ -688,7 +688,7 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
             </div>
             {uploadItems.length > 0 && <div className="batch-upload-list">{uploadItems.map((item, index) => <div className="batch-upload-item" key={item.id}>
               <button type="button" className="batch-preview-link" title="在当前页面放大核对货号" onClick={() => { setLightbox(null); setUploadPreview({ id: item.id, src: item.preview, label: `第 ${index + 1} 张待上传照片` }); setLightboxZoomed(false); }}><img src={item.preview} alt={`第 ${index + 1} 张待上传照片`} /></button>
-              <div><b>{index + 1}. {item.file.name}</b><label>货号<input inputMode="numeric" pattern="[0-9]+" value={item.sku} placeholder={item.recognizing ? "识别中，也可直接填写" : "填写数字"} onChange={(event) => updateUploadSku(item.id, event.target.value)} /></label><small>{item.recognizing && !item.sku ? "后台识别中，不用等待，可直接填写" : item.ocrNote || (item.sku ? `将保存为 ${item.sku}#` : "未识别到，请手动填写")}</small></div>
+              <div><b>{index + 1}. {item.file.name}</b><label>货号<input value={item.sku} maxLength={40} placeholder={item.recognizing ? "识别中，也可直接填写" : "填写货号"} onChange={(event) => updateUploadSku(item.id, event.target.value)} /></label><small>{item.recognizing && !item.sku ? "后台识别中，不用等待，可直接填写" : item.ocrNote || (item.sku ? `将保存为 ${item.sku}#` : "未识别到，请手动填写")}</small></div>
               <button type="button" className="batch-remove" onClick={() => removeUploadItem(item.id)} aria-label={`移除${item.file.name}`}>×</button>
             </div>)}</div>}
             <button className="save-product" disabled={loading}>{loading ? "正在批量保存…" : `保存 ${uploadItems.length || ""} 张照片`}</button>
@@ -703,7 +703,7 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
             </div>
             <div className="editor-fields">
               <div className="form-grid">
-                <label>工厂货号 *<input name="sku" required inputMode="numeric" pattern="[0-9]+" maxLength={20} defaultValue={product.sku.replace(/#$/, "")} onInput={(event) => { event.currentTarget.value = event.currentTarget.value.replace(/\D/g, ""); }} /></label><label>中文名称 *<input name="name" required defaultValue={product.name} /></label>
+                <label>工厂货号 *<input name="sku" required maxLength={40} defaultValue={product.sku.replace(/#$/, "")} placeholder="可填写数字、字母或其他字符" /></label><label>中文名称 *<input name="name" required defaultValue={product.name} /></label>
                 <label>厂家 *<input name="factory" required list="factory-options" defaultValue={product.factory} /></label>
                 <label>客人货号/型号<input name="model" defaultValue={product.model} /></label><label>款式<input name="style" defaultValue={product.style} /></label>
                 <label>单价（选填）<input name="price" min="0" step="0.01" type="number" defaultValue={Number(product.price) || ""} /></label><label>箱包分类<input name="category" list="category-options" defaultValue={product.category || "女包"} /></label>
@@ -753,7 +753,7 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
             <img src={uploadPreview.src} alt={uploadPreview.label} />
           </div>
           <div className="lightbox-actions quick-entry-actions">
-            <div className="quick-sku-entry"><b>{uploadPreview.label}</b><label>货号<div><input autoFocus inputMode="numeric" pattern="[0-9]+" value={previewUploadItem.sku} placeholder="只填数字" onChange={(event) => updateUploadSku(previewUploadItem.id, event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); advanceUploadPreview(); } }} /><span>#</span></div></label><small>{previewUploadItem.recognizing ? "后台仍在识别；直接输入后按回车看下一张" : "输入数字后按回车，自动看下一张"}</small></div>
+            <div className="quick-sku-entry"><b>{uploadPreview.label}</b><label>货号<div><input autoFocus value={previewUploadItem.sku} maxLength={40} placeholder="数字、字母或其他字符" onChange={(event) => updateUploadSku(previewUploadItem.id, event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); advanceUploadPreview(); } }} /><span>#</span></div></label><small>{previewUploadItem.recognizing ? "后台仍在识别数字货号；可直接输入后按回车看下一张" : "输入货号后按回车，自动看下一张"}</small></div>
             <div className="lightbox-buttons"><button type="button" onClick={() => setLightboxZoomed((current) => !current)}>{lightboxZoomed ? "恢复大小" : "放大 2 倍"}</button><button type="button" onClick={advanceUploadPreview}>确认并看下一张 →</button><button type="button" onClick={() => { setUploadPreview(null); setLightboxZoomed(false); }}>返回列表</button></div>
           </div>
         </div>
