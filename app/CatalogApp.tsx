@@ -22,6 +22,10 @@ type Product = {
 
 type OrderLine = { cartons: number; unitsPerCarton: number };
 type UploadItem = { id: string; file: File; preview: string; sku: string; recognizing: boolean; ocrNote: string };
+type WritablePhotoFile = { write(data: Blob): Promise<void>; close(): Promise<void> };
+type PhotoDirectory = {
+  getFileHandle(name: string, options: { create: true }): Promise<{ createWritable(): Promise<WritablePhotoFile> }>;
+};
 type SiteSettings = {
   brandName: string;
   brandSubtitle: string;
@@ -283,14 +287,16 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
     return { blob, filename: `${safeFilePart(product.sku || product.name)}.${extension}` };
   };
 
-  const downloadPhotoBundle = async (items: Product[], label: string) => {
+  const savePhotosToFolder = async (items: Product[]) => {
     const photos = items.filter((product) => product.image_key);
     if (!photos.length) return setNotice("没有可保存的照片");
+    const chooseFolder = (window as unknown as {
+      showDirectoryPicker?: (options: { mode: "readwrite" }) => Promise<PhotoDirectory>;
+    }).showDirectoryPicker?.bind(window);
+    if (!chooseFolder) return setNotice("请使用电脑上的 Chrome 或 Edge，才能直接选择文件夹保存");
     setPhotoAction("download");
-    setNotice(`正在整理 ${photos.length} 张照片…`);
     try {
-      const JSZipModule = await import("jszip");
-      const zip = new JSZipModule.default();
+      const directory = await chooseFolder({ mode: "readwrite" });
       const usedNames = new Set<string>();
       for (let index = 0; index < photos.length; index++) {
         const photo = await fetchProductPhoto(photos[index]);
@@ -300,18 +306,19 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
           filename = `${filename.slice(0, dot)}-${index + 1}${filename.slice(dot)}`;
         }
         usedNames.add(filename);
-        zip.file(filename, photo.blob);
-        setNotice(`正在整理第 ${index + 1}/${photos.length} 张照片…`);
+        setNotice(`正在保存第 ${index + 1}/${photos.length} 张照片…`);
+        const fileHandle = await directory.getFileHandle(filename, { create: true });
+        const writable = await fileHandle.createWritable();
+        await writable.write(photo.blob);
+        await writable.close();
       }
-      const output = await zip.generateAsync({ type: "blob", compression: "DEFLATE", compressionOptions: { level: 4 } });
-      const link = document.createElement("a");
-      link.href = URL.createObjectURL(output);
-      link.download = `${safeFilePart(label)}-${photos.length}张.zip`;
-      link.click();
-      URL.revokeObjectURL(link.href);
-      setNotice(`${photos.length} 张照片已打包保存`);
+      setNotice(`${photos.length} 张照片已直接保存到你选择的文件夹`);
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "照片保存失败");
+      if (error instanceof DOMException && error.name === "AbortError") {
+        setNotice("已取消选择文件夹");
+      } else {
+        setNotice(error instanceof Error ? error.message : "照片保存失败");
+      }
     } finally {
       setPhotoAction(null);
     }
@@ -356,7 +363,7 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
       if (error instanceof DOMException && error.name === "AbortError") {
         setNotice("已取消分享");
       } else if (photos.length > 1) {
-        setNotice("当前浏览器不能一次复制多张；可点击“下载所选”保存压缩包");
+        setNotice("当前浏览器不能一次复制多张；可点击“保存所选到文件夹”");
       } else {
         setNotice(error instanceof Error ? error.message : "照片复制失败");
       }
@@ -757,9 +764,9 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
               <span>已选 <b>{selectedPhotos.length}</b> 张</span>
             </div>
             <div className="photo-batch-actions">
-              {factoryFilter !== "全部厂家" && <button type="button" onClick={() => void downloadPhotoBundle(factoryPhotos, `${factoryFilter}-全部照片`)} disabled={photoAction !== null || !factoryPhotos.length}>保存该厂全部 {factoryPhotos.length} 张</button>}
+              {factoryFilter !== "全部厂家" && <button type="button" onClick={() => void savePhotosToFolder(factoryPhotos)} disabled={photoAction !== null || !factoryPhotos.length}>保存该厂全部 {factoryPhotos.length} 张</button>}
               <button type="button" onClick={() => void copyOrSharePhotos(selectedPhotos)} disabled={photoAction !== null || !selectedPhotos.length}>{photoAction === "copy" ? "正在准备…" : "复制/分享所选"}</button>
-              <button type="button" className="primary" onClick={() => void downloadPhotoBundle(selectedPhotos, "所选商品照片")} disabled={photoAction !== null || !selectedPhotos.length}>{photoAction === "download" ? "正在打包…" : "下载所选"}</button>
+              <button type="button" className="primary" onClick={() => void savePhotosToFolder(selectedPhotos)} disabled={photoAction !== null || !selectedPhotos.length}>{photoAction === "download" ? "正在保存…" : "保存所选到文件夹"}</button>
               {selectedPhotos.length > 0 && <button type="button" className="clear" onClick={() => setSelectedPhotoIds([])} disabled={photoAction !== null}>清空</button>}
             </div>
           </div>}
