@@ -345,25 +345,18 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
   const copyOrSharePhotos = async (items: Product[]) => {
     const photos = items.filter((product) => product.image_key);
     if (!photos.length) return setNotice("请先勾选照片");
+    if (photos.length > 1) return setNotice("复制照片一次只能选 1 张；多张请保存到文件夹");
     setPhotoAction("copy");
-    setNotice(`正在准备 ${photos.length} 张照片…`);
+    setNotice("正在准备照片…");
     try {
-      const fetched = await Promise.all(photos.map(fetchProductPhoto));
-      const files = fetched.map(({ blob, filename }) => new File([blob], filename, { type: blob.type || "image/jpeg" }));
-      if (files.length > 1 && navigator.canShare?.({ files })) {
-        await navigator.share({ files, title: `${photos[0].factory || "商品"}照片` });
-        setNotice(`已打开 ${files.length} 张照片的分享菜单`);
-        return;
-      }
+      const fetched = await fetchProductPhoto(photos[0]);
       if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined") throw new Error("当前浏览器不支持复制照片");
-      const pngBlobs = await Promise.all(fetched.map(({ blob }) => photoBlobAsPng(blob)));
-      await navigator.clipboard.write(pngBlobs.map((blob) => new ClipboardItem({ "image/png": blob })));
-      setNotice(`${photos.length} 张照片已复制，可以直接粘贴`);
+      const pngBlob = await photoBlobAsPng(fetched.blob);
+      await navigator.clipboard.write([new ClipboardItem({ "image/png": pngBlob })]);
+      setNotice("照片已复制，可以直接粘贴");
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
-        setNotice("已取消分享");
-      } else if (photos.length > 1) {
-        setNotice("当前浏览器不能一次复制多张；可点击“保存所选到文件夹”");
+        setNotice("已取消复制");
       } else {
         setNotice(error instanceof Error ? error.message : "照片复制失败");
       }
@@ -765,7 +758,7 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
             </div>
             <div className="photo-batch-actions">
               {factoryFilter !== "全部厂家" && <button type="button" onClick={() => void savePhotosToFolder(factoryPhotos)} disabled={photoAction !== null || !factoryPhotos.length}>保存该厂全部 {factoryPhotos.length} 张</button>}
-              <button type="button" onClick={() => void copyOrSharePhotos(selectedPhotos)} disabled={photoAction !== null || !selectedPhotos.length}>{photoAction === "copy" ? "正在准备…" : "复制/分享所选"}</button>
+              <button type="button" onClick={() => void copyOrSharePhotos(selectedPhotos)} disabled={photoAction !== null || selectedPhotos.length !== 1}>{photoAction === "copy" ? "正在复制…" : selectedPhotos.length > 1 ? "复制只支持单张" : "复制这张"}</button>
               <button type="button" className="primary" onClick={() => void savePhotosToFolder(selectedPhotos)} disabled={photoAction !== null || !selectedPhotos.length}>{photoAction === "download" ? "正在保存…" : "保存所选到文件夹"}</button>
               {selectedPhotos.length > 0 && <button type="button" className="clear" onClick={() => setSelectedPhotoIds([])} disabled={photoAction !== null}>清空</button>}
             </div>

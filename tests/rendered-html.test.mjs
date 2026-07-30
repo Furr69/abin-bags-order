@@ -26,7 +26,8 @@ test("ships a private photo library with optional prices and full-size downloads
   assert.match(catalog, /保存到电脑/);
   assert.match(catalog, /全选当前照片/);
   assert.match(catalog, /保存该厂全部/);
-  assert.match(catalog, /复制\/分享所选/);
+  assert.match(catalog, /复制只支持单张/);
+  assert.match(catalog, /复制照片一次只能选 1 张/);
   assert.match(catalog, /保存所选到文件夹/);
   assert.match(catalog, /showDirectoryPicker/);
   assert.doesNotMatch(catalog, /import\("jszip"\)/);
