@@ -196,6 +196,8 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
   const [lightboxZoomed, setLightboxZoomed] = useState(false);
   const [priceDrafts, setPriceDrafts] = useState<Record<number, string>>({});
   const [savingPriceId, setSavingPriceId] = useState<number | null>(null);
+  const [selectedPhotoIds, setSelectedPhotoIds] = useState<number[]>([]);
+  const [photoAction, setPhotoAction] = useState<"download" | "copy" | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
 
   const loadProducts = async () => {
@@ -264,6 +266,114 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
     return sum + order.cartons * order.unitsPerCarton * Number(product.price);
   }, 0);
   const hasPricedSelection = selected.some((product) => Number(product.price) > 0);
+  const selectedPhotos = products.filter((product) => selectedPhotoIds.includes(product.id) && product.image_key);
+  const visiblePhotoIds = filtered.filter((product) => product.image_key).map((product) => product.id);
+  const factoryPhotos = factoryFilter === "全部厂家"
+    ? []
+    : products.filter((product) => (product.factory || "未标厂家") === factoryFilter && product.image_key);
+
+  const safeFilePart = (value: string) => value.replace(/[\\/:*?"<>|]/g, "-").trim() || "商品照片";
+
+  const fetchProductPhoto = async (product: Product) => {
+    if (!product.image_key) throw new Error(`${product.sku} 没有照片`);
+    const response = await fetch(`/api/images/${encodeURIComponent(product.image_key)}`);
+    if (!response.ok) throw new Error(`${product.sku} 照片读取失败`);
+    const blob = await response.blob();
+    const extension = product.image_key.split(".").pop()?.toLowerCase() || (blob.type === "image/png" ? "png" : "jpg");
+    return { blob, filename: `${safeFilePart(product.sku || product.name)}.${extension}` };
+  };
+
+  const downloadPhotoBundle = async (items: Product[], label: string) => {
+    const photos = items.filter((product) => product.image_key);
+    if (!photos.length) return setNotice("没有可保存的照片");
+    setPhotoAction("download");
+    setNotice(`正在整理 ${photos.length} 张照片…`);
+    try {
+      const JSZipModule = await import("jszip");
+      const zip = new JSZipModule.default();
+      const usedNames = new Set<string>();
+      for (let index = 0; index < photos.length; index++) {
+        const photo = await fetchProductPhoto(photos[index]);
+        let filename = photo.filename;
+        if (usedNames.has(filename)) {
+          const dot = filename.lastIndexOf(".");
+          filename = `${filename.slice(0, dot)}-${index + 1}${filename.slice(dot)}`;
+        }
+        usedNames.add(filename);
+        zip.file(filename, photo.blob);
+        setNotice(`正在整理第 ${index + 1}/${photos.length} 张照片…`);
+      }
+      const output = await zip.generateAsync({ type: "blob", compression: "DEFLATE", compressionOptions: { level: 4 } });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(output);
+      link.download = `${safeFilePart(label)}-${photos.length}张.zip`;
+      link.click();
+      URL.revokeObjectURL(link.href);
+      setNotice(`${photos.length} 张照片已打包保存`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "照片保存失败");
+    } finally {
+      setPhotoAction(null);
+    }
+  };
+
+  const photoBlobAsPng = async (blob: Blob) => {
+    if (blob.type === "image/png") return blob;
+    const bitmap = await createImageBitmap(blob);
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const context = canvas.getContext("2d");
+    if (!context) {
+      bitmap.close();
+      throw new Error("照片转换失败");
+    }
+    context.drawImage(bitmap, 0, 0);
+    bitmap.close();
+    const png = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+    if (!png) throw new Error("照片转换失败");
+    return png;
+  };
+
+  const copyOrSharePhotos = async (items: Product[]) => {
+    const photos = items.filter((product) => product.image_key);
+    if (!photos.length) return setNotice("请先勾选照片");
+    setPhotoAction("copy");
+    setNotice(`正在准备 ${photos.length} 张照片…`);
+    try {
+      const fetched = await Promise.all(photos.map(fetchProductPhoto));
+      const files = fetched.map(({ blob, filename }) => new File([blob], filename, { type: blob.type || "image/jpeg" }));
+      if (files.length > 1 && navigator.canShare?.({ files })) {
+        await navigator.share({ files, title: `${photos[0].factory || "商品"}照片` });
+        setNotice(`已打开 ${files.length} 张照片的分享菜单`);
+        return;
+      }
+      if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined") throw new Error("当前浏览器不支持复制照片");
+      const pngBlobs = await Promise.all(fetched.map(({ blob }) => photoBlobAsPng(blob)));
+      await navigator.clipboard.write(pngBlobs.map((blob) => new ClipboardItem({ "image/png": blob })));
+      setNotice(`${photos.length} 张照片已复制，可以直接粘贴`);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        setNotice("已取消分享");
+      } else if (photos.length > 1) {
+        setNotice("当前浏览器不能一次复制多张；可点击“下载所选”保存压缩包");
+      } else {
+        setNotice(error instanceof Error ? error.message : "照片复制失败");
+      }
+    } finally {
+      setPhotoAction(null);
+    }
+  };
+
+  const togglePhotoSelection = (id: number) => setSelectedPhotoIds((current) =>
+    current.includes(id) ? current.filter((selectedId) => selectedId !== id) : [...current, id]);
+
+  const toggleVisiblePhotos = () => setSelectedPhotoIds((current) => {
+    const allVisibleSelected = visiblePhotoIds.length > 0 && visiblePhotoIds.every((id) => current.includes(id));
+    return allVisibleSelected
+      ? current.filter((id) => !visiblePhotoIds.includes(id))
+      : Array.from(new Set([...current, ...visiblePhotoIds]));
+  });
 
   const exportExcel = async () => {
     if (!selected.length) return setNotice("请先选择商品并填写箱数");
@@ -639,10 +749,29 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
           </div>
           <div className="factory-filter"><span>厂家</span><div className="chips">{factories.map((factory) => <button key={factory} className={factoryFilter === factory ? "selected" : ""} onClick={() => setFactoryFilter(factory)}>{factory}</button>)}</div></div>
           <div className="chips">{categories.map((category) => <button key={category} className={categoryFilter === category ? "selected" : ""} onClick={() => setCategoryFilter(category)}>{category}</button>)}</div>
+          {products.length > 0 && <div className="photo-batch-bar">
+            <div>
+              <button type="button" className="batch-select-button" onClick={toggleVisiblePhotos}>
+                {visiblePhotoIds.length > 0 && visiblePhotoIds.every((id) => selectedPhotoIds.includes(id)) ? "取消全选" : "全选当前照片"}
+              </button>
+              <span>已选 <b>{selectedPhotos.length}</b> 张</span>
+            </div>
+            <div className="photo-batch-actions">
+              {factoryFilter !== "全部厂家" && <button type="button" onClick={() => void downloadPhotoBundle(factoryPhotos, `${factoryFilter}-全部照片`)} disabled={photoAction !== null || !factoryPhotos.length}>保存该厂全部 {factoryPhotos.length} 张</button>}
+              <button type="button" onClick={() => void copyOrSharePhotos(selectedPhotos)} disabled={photoAction !== null || !selectedPhotos.length}>{photoAction === "copy" ? "正在准备…" : "复制/分享所选"}</button>
+              <button type="button" className="primary" onClick={() => void downloadPhotoBundle(selectedPhotos, "所选商品照片")} disabled={photoAction !== null || !selectedPhotos.length}>{photoAction === "download" ? "正在打包…" : "下载所选"}</button>
+              {selectedPhotos.length > 0 && <button type="button" className="clear" onClick={() => setSelectedPhotoIds([])} disabled={photoAction !== null}>清空</button>}
+            </div>
+          </div>}
           {products.length === 0 ? <div className="empty catalog-empty"><b>图片库还是空的</b><p>去上传第一张商品图片吧。</p>{adminMode && <button onClick={() => setView("admin")}>去上传商品</button>}</div> :
           <div className="product-grid">{filtered.map((product, index) => {
             const order = orderFor(product);
-            return <article className="product-card" key={product.id}>
+            const photoSelected = selectedPhotoIds.includes(product.id);
+            return <article className={`product-card ${photoSelected ? "photo-selected" : ""}`} key={product.id}>
+              {product.image_key && <label className="photo-selector" onClick={(event) => event.stopPropagation()}>
+                <input type="checkbox" checked={photoSelected} onChange={() => togglePhotoSelection(product.id)} />
+                <span>{photoSelected ? "已选" : "选择"}</span>
+              </label>}
               <button type="button" className={`product-image image-zoom ${palettes[index % palettes.length]}`} onClick={() => product.image_key && openLightbox(product)} disabled={!product.image_key} aria-label={product.image_key ? `放大查看${product.name}` : `${product.name}暂无图片`}>
                 {product.image_key ? <img src={`/api/images/${product.image_key}`} alt={product.name} /> : <><span className="bag-shape">◡</span><small>暂无商品图片</small></>}
                 <span className="sku">{product.sku}</span>

@@ -24,6 +24,11 @@ test("ships a private photo library with optional prices and full-size downloads
   assert.match(catalog, /name="image" multiple/);
   assert.match(catalog, /className="lightbox"/);
   assert.match(catalog, /保存到电脑/);
+  assert.match(catalog, /全选当前照片/);
+  assert.match(catalog, /保存该厂全部/);
+  assert.match(catalog, /复制\/分享所选/);
+  assert.match(catalog, /下载所选/);
+  assert.match(catalog, /import\("jszip"\)/);
   assert.match(catalog, /const maxUploadBytes = 1_500_000/);
   assert.match(catalog, /optimizeImageForUpload/);
   assert.match(catalog, /response.status === 413/);
