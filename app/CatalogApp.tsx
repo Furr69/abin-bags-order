@@ -186,7 +186,7 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
   const [factoryFilter, setFactoryFilter] = useState("全部厂家");
   const [orders, setOrders] = useState<Record<number, OrderLine>>({});
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [view, setView] = useState<"catalog" | "order" | "admin" | "appearance">(adminMode ? "admin" : "catalog");
+  const [view, setView] = useState<"catalog" | "order" | "admin" | "appearance">("catalog");
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);

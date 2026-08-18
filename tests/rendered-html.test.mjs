@@ -14,6 +14,7 @@ test("ships a private photo library with optional prices and full-size downloads
     readFile(new URL("../.openai/hosting.json", import.meta.url), "utf8"),
   ]);
   assert.match(catalog, /const packOptions = \[50, 60, 70, 80, 90, 100\]/);
+  assert.match(catalog, /useState<"catalog" \| "order" \| "admin" \| "appearance">\("catalog"\)/);
   assert.match(catalog, /order-template\.xlsx/);
   assert.match(catalog, /workbook\.addImage/);
   assert.match(catalog, /编辑全部信息\/更换照片/);
