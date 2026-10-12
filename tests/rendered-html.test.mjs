@@ -30,6 +30,12 @@ test("ships a private photo library with optional prices and full-size downloads
   assert.match(catalog, /复制只支持单张/);
   assert.match(catalog, /复制照片一次只能选 1 张/);
   assert.match(catalog, /保存所选到文件夹/);
+  assert.match(catalog, /导出完整迁移备份/);
+  assert.match(catalog, /abin-product-library-backup/);
+  assert.match(catalog, /backup\.json/);
+  assert.match(catalog, /商品资料\.xlsx/);
+  assert.match(catalog, /backup_image_path/);
+  assert.match(catalog, /getDirectoryHandle\("images"/);
   assert.match(catalog, /showDirectoryPicker/);
   assert.doesNotMatch(catalog, /import\("jszip"\)/);
   assert.match(catalog, /const maxUploadBytes = 1_500_000/);

@@ -130,6 +130,7 @@ nav button { height:100%; }
 .photo-batch-bar span { color:var(--muted); font-size:12px; white-space:nowrap; }
 .photo-batch-bar button { min-height:38px; border:1px solid var(--line); border-radius:10px; padding:0 13px; background:#fff; color:var(--ink); cursor:pointer; font-size:12px; font-weight:700; }
 .photo-batch-bar button.primary { border-color:var(--accent); background:var(--accent); color:#fff; }
+.photo-batch-bar button.backup { border-color:#55744e; background:#edf4e9; color:#365c30; }
 .photo-batch-bar button.clear { color:var(--muted); }
 .photo-batch-bar button:disabled { cursor:not-allowed; opacity:.45; }
 .product-card { position:relative; }

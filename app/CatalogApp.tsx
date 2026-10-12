@@ -18,6 +18,7 @@ type Product = {
   stock: number;
   notes: string;
   image_key: string | null;
+  created_at: string;
 };
 
 type OrderLine = { cartons: number; unitsPerCarton: number };
@@ -25,6 +26,7 @@ type UploadItem = { id: string; file: File; preview: string; sku: string; recogn
 type WritablePhotoFile = { write(data: Blob): Promise<void>; close(): Promise<void> };
 type PhotoDirectory = {
   getFileHandle(name: string, options: { create: true }): Promise<{ createWritable(): Promise<WritablePhotoFile> }>;
+  getDirectoryHandle(name: string, options: { create: true }): Promise<PhotoDirectory>;
 };
 type SiteSettings = {
   brandName: string;
@@ -201,7 +203,7 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
   const [priceDrafts, setPriceDrafts] = useState<Record<number, string>>({});
   const [savingPriceId, setSavingPriceId] = useState<number | null>(null);
   const [selectedPhotoIds, setSelectedPhotoIds] = useState<number[]>([]);
-  const [photoAction, setPhotoAction] = useState<"download" | "copy" | null>(null);
+  const [photoAction, setPhotoAction] = useState<"download" | "copy" | "backup" | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
 
   const loadProducts = async () => {
@@ -278,6 +280,17 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
 
   const safeFilePart = (value: string) => value.replace(/[\\/:*?"<>|]/g, "-").trim() || "商品照片";
 
+  const chooseBackupFolder = () => (window as unknown as {
+    showDirectoryPicker?: (options: { mode: "readwrite" }) => Promise<PhotoDirectory>;
+  }).showDirectoryPicker?.bind(window);
+
+  const writeDirectoryFile = async (directory: PhotoDirectory, name: string, data: Blob) => {
+    const fileHandle = await directory.getFileHandle(name, { create: true });
+    const writable = await fileHandle.createWritable();
+    await writable.write(data);
+    await writable.close();
+  };
+
   const fetchProductPhoto = async (product: Product) => {
     if (!product.image_key) throw new Error(`${product.sku} 没有照片`);
     const response = await fetch(`/api/images/${encodeURIComponent(product.image_key)}`);
@@ -290,9 +303,7 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
   const savePhotosToFolder = async (items: Product[]) => {
     const photos = items.filter((product) => product.image_key);
     if (!photos.length) return setNotice("没有可保存的照片");
-    const chooseFolder = (window as unknown as {
-      showDirectoryPicker?: (options: { mode: "readwrite" }) => Promise<PhotoDirectory>;
-    }).showDirectoryPicker?.bind(window);
+    const chooseFolder = chooseBackupFolder();
     if (!chooseFolder) return setNotice("请使用电脑上的 Chrome 或 Edge，才能直接选择文件夹保存");
     setPhotoAction("download");
     try {
@@ -318,6 +329,97 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
         setNotice("已取消选择文件夹");
       } else {
         setNotice(error instanceof Error ? error.message : "照片保存失败");
+      }
+    } finally {
+      setPhotoAction(null);
+    }
+  };
+
+  const exportFullMigrationBackup = async () => {
+    const chooseFolder = chooseBackupFolder();
+    if (!chooseFolder) return setNotice("请使用电脑上的 Chrome 或 Edge 导出完整备份");
+    setPhotoAction("backup");
+    try {
+      const selectedDirectory = await chooseFolder({ mode: "readwrite" });
+      const exportedAt = new Date();
+      const timestamp = exportedAt.toISOString().replace(/[:.]/g, "-");
+      const backupDirectory = await selectedDirectory.getDirectoryHandle(`阿斌图片库完整备份-${timestamp}`, { create: true });
+      const imagesDirectory = await backupDirectory.getDirectoryHandle("images", { create: true });
+      const productsWithPaths = products.map((product) => ({
+        ...product,
+        backup_image_path: product.image_key ? `images/${product.image_key}` : null,
+      }));
+      const photos = products.filter((product) => product.image_key);
+
+      for (let index = 0; index < photos.length; index++) {
+        const product = photos[index];
+        setNotice(`正在备份原图 ${index + 1}/${photos.length}…`);
+        const response = await fetch(`/api/images/${encodeURIComponent(product.image_key!)}`);
+        if (!response.ok) throw new Error(`${product.factory} · ${product.sku} 的原图读取失败，备份尚未完成`);
+        await writeDirectoryFile(imagesDirectory, product.image_key!, await response.blob());
+      }
+
+      setNotice("正在写入完整商品数据…");
+      const backup = {
+        format: "abin-product-library-backup",
+        version: 1,
+        exported_at: exportedAt.toISOString(),
+        product_count: products.length,
+        image_count: photos.length,
+        settings,
+        products: productsWithPaths,
+      };
+      await writeDirectoryFile(backupDirectory, "backup.json", new Blob([JSON.stringify(backup, null, 2)], { type: "application/json;charset=utf-8" }));
+
+      const ExcelJSModule = await import("exceljs");
+      const workbook = new ExcelJSModule.default.Workbook();
+      const sheet = workbook.addWorksheet("商品资料");
+      sheet.columns = [
+        { header: "ID", key: "id", width: 10 },
+        { header: "厂家", key: "factory", width: 20 },
+        { header: "货号", key: "sku", width: 18 },
+        { header: "品名", key: "name", width: 22 },
+        { header: "型号", key: "model", width: 16 },
+        { header: "款式", key: "style", width: 16 },
+        { header: "分类", key: "category", width: 16 },
+        { header: "价格", key: "price", width: 12 },
+        { header: "材质", key: "material", width: 16 },
+        { header: "尺寸", key: "size", width: 16 },
+        { header: "每箱个数", key: "packing_quantity", width: 12 },
+        { header: "单箱体积", key: "carton_volume", width: 12 },
+        { header: "库存", key: "stock", width: 10 },
+        { header: "备注", key: "notes", width: 28 },
+        { header: "原图片编号", key: "image_key", width: 42 },
+        { header: "备份图片路径", key: "backup_image_path", width: 50 },
+        { header: "创建时间", key: "created_at", width: 24 },
+      ];
+      productsWithPaths.forEach((product) => sheet.addRow(product));
+      sheet.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
+      sheet.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFB94634" } };
+      sheet.views = [{ state: "frozen", ySplit: 1 }];
+      const excelBytes = await workbook.xlsx.writeBuffer();
+      await writeDirectoryFile(backupDirectory, "商品资料.xlsx", new Blob([excelBytes as BlobPart], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+
+      const instructions = [
+        "阿斌商品图片库完整迁移备份",
+        "",
+        "1. backup.json 是原样导入的权威数据文件，请保留全部字段、ID 和 image_key。",
+        "2. images 文件夹中的文件名与商品的 image_key 完全一致。",
+        "3. 商品资料.xlsx 方便人工查看，不应代替 backup.json 做无损导入。",
+        "4. 导入新网站时，先上传 images 中的原图，再按 backup.json 恢复商品和页面设置。",
+        "5. 不要按货号合并数据：不同厂家允许使用相同货号。",
+        "",
+        `导出时间：${exportedAt.toISOString()}`,
+        `商品数量：${products.length}`,
+        `图片数量：${photos.length}`,
+      ].join("\r\n");
+      await writeDirectoryFile(backupDirectory, "导入说明.txt", new Blob([instructions], { type: "text/plain;charset=utf-8" }));
+      setNotice(`完整备份已导出：${products.length} 条商品数据、${photos.length} 张原图`);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        setNotice("已取消导出备份");
+      } else {
+        setNotice(error instanceof Error ? error.message : "完整备份导出失败");
       }
     } finally {
       setPhotoAction(null);
@@ -757,6 +859,7 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
               <span>已选 <b>{selectedPhotos.length}</b> 张</span>
             </div>
             <div className="photo-batch-actions">
+              <button type="button" className="backup" onClick={() => void exportFullMigrationBackup()} disabled={photoAction !== null}>{photoAction === "backup" ? "正在导出完整备份…" : "导出完整迁移备份"}</button>
               {factoryFilter !== "全部厂家" && <button type="button" onClick={() => void savePhotosToFolder(factoryPhotos)} disabled={photoAction !== null || !factoryPhotos.length}>保存该厂全部 {factoryPhotos.length} 张</button>}
               <button type="button" onClick={() => void copyOrSharePhotos(selectedPhotos)} disabled={photoAction !== null || selectedPhotos.length !== 1}>{photoAction === "copy" ? "正在复制…" : selectedPhotos.length > 1 ? "复制只支持单张" : "复制这张"}</button>
               <button type="button" className="primary" onClick={() => void savePhotosToFolder(selectedPhotos)} disabled={photoAction !== null || !selectedPhotos.length}>{photoAction === "download" ? "正在保存…" : "保存所选到文件夹"}</button>
