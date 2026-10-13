@@ -1,6 +1,7 @@
 "use client";
 
 import { CSSProperties, FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { downloadBackupImage } from "./backup-image.mjs";
 
 type Product = {
   id: number;
@@ -285,10 +286,14 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
   }).showDirectoryPicker?.bind(window);
 
   const writeDirectoryFile = async (directory: PhotoDirectory, name: string, data: Blob) => {
-    const fileHandle = await directory.getFileHandle(name, { create: true });
-    const writable = await fileHandle.createWritable();
-    await writable.write(data);
-    await writable.close();
+    try {
+      const fileHandle = await directory.getFileHandle(name, { create: true });
+      const writable = await fileHandle.createWritable();
+      await writable.write(data);
+      await writable.close();
+    } catch (error) {
+      throw new Error(`文件夹写入失败（${name}）：${error instanceof Error ? error.message : '请确认保存权限及磁盘空间'}`);
+    }
   };
 
   const fetchProductPhoto = async (product: Product) => {
@@ -336,6 +341,7 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
   };
 
   const exportFullMigrationBackup = async () => {
+    if (!products.length) return setNotice("商品数据尚未加载，请等图片库显示商品后再导出");
     const chooseFolder = chooseBackupFolder();
     if (!chooseFolder) return setNotice("请使用电脑上的 Chrome 或 Edge 导出完整备份");
     setPhotoAction("backup");
@@ -351,14 +357,6 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
       }));
       const photos = products.filter((product) => product.image_key);
 
-      for (let index = 0; index < photos.length; index++) {
-        const product = photos[index];
-        setNotice(`正在备份原图 ${index + 1}/${photos.length}…`);
-        const response = await fetch(`/api/images/${encodeURIComponent(product.image_key!)}`);
-        if (!response.ok) throw new Error(`${product.factory} · ${product.sku} 的原图读取失败，备份尚未完成`);
-        await writeDirectoryFile(imagesDirectory, product.image_key!, await response.blob());
-      }
-
       setNotice("正在写入完整商品数据…");
       const backup = {
         format: "abin-product-library-backup",
@@ -370,6 +368,9 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
         products: productsWithPaths,
       };
       await writeDirectoryFile(backupDirectory, "backup.json", new Blob([JSON.stringify(backup, null, 2)], { type: "application/json;charset=utf-8" }));
+      const report = { complete: false, product_count: products.length, expected_images: photos.length, saved_images: 0, failed_images: [] as { factory: string; sku: string; image_key: string; error: string }[] };
+      const saveReport = () => writeDirectoryFile(backupDirectory, "导出状态.json", new Blob([JSON.stringify(report, null, 2)], { type: "application/json;charset=utf-8" }));
+      await saveReport();
 
       const ExcelJSModule = await import("exceljs");
       const workbook = new ExcelJSModule.default.Workbook();
@@ -414,6 +415,24 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
         `图片数量：${photos.length}`,
       ].join("\r\n");
       await writeDirectoryFile(backupDirectory, "导入说明.txt", new Blob([instructions], { type: "text/plain;charset=utf-8" }));
+      for (let index = 0; index < photos.length; index++) {
+        const product = photos[index];
+        setNotice(`商品数据已保存，正在备份原图 ${index + 1}/${photos.length}…`);
+        try {
+          const blob = await downloadBackupImage(`/api/images/${encodeURIComponent(product.image_key!)}`);
+          await writeDirectoryFile(imagesDirectory, product.image_key!, blob);
+          report.saved_images++;
+        } catch (error) {
+          report.failed_images.push({ factory: product.factory, sku: product.sku, image_key: product.image_key!, error: error instanceof Error ? error.message : "下载失败" });
+        }
+        await saveReport();
+      }
+      report.complete = report.failed_images.length === 0;
+      await saveReport();
+      if (!report.complete) {
+        setNotice(`商品数据和 Excel 已保存；图片成功 ${report.saved_images} 张，失败 ${report.failed_images.length} 张。请查看文件夹中的“导出状态.json”，本次备份尚不完整`);
+        return;
+      }
       setNotice(`完整备份已导出：${products.length} 条商品数据、${photos.length} 张原图`);
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
@@ -849,6 +868,7 @@ export default function CatalogApp({ adminMode = false, adminName = "" }: { admi
             <label className="search"><span>⌕</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索货号、品名、型号、分类…" /></label>
             <div className="result-count">共 <b>{filtered.length}</b> 款商品</div>
           </div>
+          {photoAction === "backup" && <p role="status" className="demo-tip"><b>完整备份导出中</b>{notice} 请保持此页面打开，等待显示“完整备份已导出”。</p>}
           <div className="factory-filter"><span>厂家</span><div className="chips">{factories.map((factory) => <button key={factory} className={factoryFilter === factory ? "selected" : ""} onClick={() => setFactoryFilter(factory)}>{factory}</button>)}</div></div>
           <div className="chips">{categories.map((category) => <button key={category} className={categoryFilter === category ? "selected" : ""} onClick={() => setCategoryFilter(category)}>{category}</button>)}</div>
           {products.length > 0 && <div className="photo-batch-bar">
